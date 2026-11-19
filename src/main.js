@@ -94,14 +94,24 @@ function positionForSlot(slot) {
 function createPlayer(slot, id, name, color) {
   return { id, name: cleanName(name), color: color || "#c7f36b", ...positionForSlot(slot),
     targetX: null, targetZ: null, targetRotation: null, mesh: null, rigged: false,
-    velocityX: 0, velocityZ: 0, swing: 0, swingType: "drive", bot: false, botThink: 0 };
+    velocityX: 0, velocityZ: 0, moving: 0, swing: 0, swingType: "drive",
+    splitStep: 0, lunge: 0, lungeSide: 1, lungeStrength: 1, lungeCooldown: 0,
+    bot: false, botThink: 0 };
 }
 function mergePlayers(incoming, snap = false) {
   const previous = new Map(S.players.map(p => [p.id, p]));
   S.players = (incoming || []).map(data => {
     const existing = previous.get(data.id);
     if (existing) {
-      Object.assign(existing, { name: data.name, color: data.color, team: data.team, slot: data.slot });
+      Object.assign(existing, {
+        name: data.name, color: data.color, team: data.team, slot: data.slot,
+        swing: data.swing ?? existing.swing ?? 0,
+        swingType: data.swingType ?? existing.swingType ?? "drive",
+        splitStep: data.splitStep ?? existing.splitStep ?? 0,
+        lunge: data.lunge ?? existing.lunge ?? 0,
+        lungeSide: data.lungeSide ?? existing.lungeSide ?? 1,
+        lungeStrength: data.lungeStrength ?? existing.lungeStrength ?? 1
+      });
       if (snap) {
         existing.x = data.x; existing.z = data.z; existing.rotation = data.rotation;
       }
@@ -110,7 +120,10 @@ function mergePlayers(incoming, snap = false) {
     }
     return { ...data, targetX: data.x, targetZ: data.z,
       targetRotation: data.rotation, mesh: null, rigged: false,
-      velocityX: 0, velocityZ: 0, swing: 0, moving: 0 };
+      velocityX: 0, velocityZ: 0, moving: 0, swing: data.swing || 0,
+      swingType: data.swingType || "drive", splitStep: data.splitStep || 0,
+      lunge: data.lunge || 0, lungeSide: data.lungeSide || 1,
+      lungeStrength: data.lungeStrength || 1, lungeCooldown: 0 };
   });
 }
 function updatePlayerLabels() {
@@ -353,7 +366,7 @@ function animate() {
 function animatePlayer(p, dt, time) {
   if (!p.mesh) return;
   if (p.mesh.userData.rigged) {
-    animateRiggedAvatar(p.mesh, p, dt, time);
+    animateRiggedAvatar(p.mesh, p, dt, time, S.ball?.position || null);
     return;
   }
   const q = p.mesh.userData;
@@ -406,6 +419,16 @@ function updateGame(dt) {
     }
     if (magnitude > .08) local.rotation = Math.atan2(-dx, -dz);
     local.moving = Math.min(1, Math.hypot(local.velocityX, local.velocityZ) / speed);
+    local.lungeCooldown = Math.max(0, (local.lungeCooldown || 0) - dt);
+    if (S.ball && S.ball.position.z * (local.team === 0 ? 1 : -1) > 0) {
+      const ballDistance = Math.hypot(S.ball.position.x - local.x, S.ball.position.z - local.z);
+      if (ballDistance < 1.55 && local.moving > .58 && local.lungeCooldown <= 0) {
+        local.lunge = .42;
+        local.lungeSide = S.ball.position.x >= local.x ? 1 : -1;
+        local.lungeStrength = THREE.MathUtils.clamp((ballDistance - .3) / 1.2, .25, .8);
+        local.lungeCooldown = .85;
+      }
+    }
     if (local.mesh) {
       local.mesh.position.set(local.x, 0, local.z);
       local.mesh.rotation.y = local.rotation || 0;
@@ -421,7 +444,10 @@ function updateGame(dt) {
       p.x = THREE.MathUtils.damp(p.x, p.targetX, 12, dt);
       p.z = THREE.MathUtils.damp(p.z, p.targetZ, 12, dt);
       p.rotation = THREE.MathUtils.damp(p.rotation || 0, p.targetRotation || 0, 10, dt);
-      p.moving = dt > 0 ? Math.min(1, Math.hypot(p.x - previousX, p.z - previousZ) / dt / 4.5) : 0;
+      p.velocityX = dt > 0 ? (p.x - previousX) / dt : 0;
+      p.velocityZ = dt > 0 ? (p.z - previousZ) / dt : 0;
+      p.moving = Math.min(1, Math.hypot(p.velocityX, p.velocityZ) / 4.5);
+      p.lungeCooldown = Math.max(0, (p.lungeCooldown || 0) - dt);
       if (p.mesh) { p.mesh.position.set(p.x, 0, p.z); p.mesh.rotation.y = p.rotation; }
     }
     if (p.bot && S.hostOrTraining && S.phase === "rally") updateBot(p, dt);
@@ -438,16 +464,37 @@ function updateBot(p, dt) {
   if (!S.ball || !S.velocity) return;
   const ballSide = S.ball.position.z >= 0 ? 0 : 1;
   if (ballSide !== p.team) return;
-  const targetX = THREE.MathUtils.clamp(S.ball.position.x * .9, -2.35, 2.35);
+  const timeToIntercept = THREE.MathUtils.clamp(
+    Math.abs(S.ball.position.z - p.z) / Math.max(4, Math.abs(S.velocity.z)), 0, .28
+  );
+  const targetX = THREE.MathUtils.clamp(S.ball.position.x + S.velocity.x * timeToIntercept, -2.35, 2.35);
   const targetZ = p.team === 0
-    ? THREE.MathUtils.clamp(S.ball.position.z + .8, 1.2, 5.9)
-    : THREE.MathUtils.clamp(S.ball.position.z - .8, -5.9, -1.2);
-  p.x = THREE.MathUtils.damp(p.x, targetX, 2.8, dt);
-  p.z = THREE.MathUtils.damp(p.z, targetZ, 2.8, dt);
-  p.moving = Math.min(1, Math.hypot(targetX - p.x, targetZ - p.z));
-  if (p.mesh) { p.mesh.position.set(p.x, 0, p.z); p.mesh.rotation.y = p.team === 0 ? 0 : Math.PI; }
+    ? THREE.MathUtils.clamp(S.ball.position.z + .62, 1.15, 5.9)
+    : THREE.MathUtils.clamp(S.ball.position.z - .62, -5.9, -1.15);
+  const previousX = p.x, previousZ = p.z;
+  const toX = targetX - p.x, toZ = targetZ - p.z;
+  const distanceToTarget = Math.hypot(toX, toZ);
+  const desiredSpeed = Math.min(4.15, distanceToTarget * 3.3);
+  const desiredX = distanceToTarget > .001 ? toX / distanceToTarget * desiredSpeed : 0;
+  const desiredZ = distanceToTarget > .001 ? toZ / distanceToTarget * desiredSpeed : 0;
+  p.velocityX = THREE.MathUtils.damp(p.velocityX || 0, desiredX, 8.5, dt);
+  p.velocityZ = THREE.MathUtils.damp(p.velocityZ || 0, desiredZ, 8.5, dt);
+  p.x = THREE.MathUtils.clamp(p.x + p.velocityX * dt, -2.55, 2.55);
+  p.z = p.team === 0
+    ? THREE.MathUtils.clamp(p.z + p.velocityZ * dt, 1.1, 6.05)
+    : THREE.MathUtils.clamp(p.z + p.velocityZ * dt, -6.05, -1.1);
+  p.moving = Math.min(1, Math.hypot(p.velocityX, p.velocityZ) / 4.5);
+  p.rotation = Math.atan2(-(S.ball.position.x - p.x), -(S.ball.position.z - p.z));
+  if (p.mesh) { p.mesh.position.set(p.x, 0, p.z); p.mesh.rotation.y = p.rotation; }
   p.botThink = Math.max(0, p.botThink - dt);
+  p.lungeCooldown = Math.max(0, (p.lungeCooldown || 0) - dt);
   const dist = Math.hypot(S.ball.position.x - p.x, S.ball.position.z - p.z);
+  if (dist < 1.4 && p.lungeCooldown <= 0 && p.moving > .25) {
+    p.lunge = .48;
+    p.lungeSide = S.ball.position.x >= p.x ? 1 : -1;
+    p.lungeStrength = THREE.MathUtils.clamp((dist - .35) / 1.1, .28, .85);
+    p.lungeCooldown = .9;
+  }
   if (dist < 1.45 && p.botThink <= 0 && S.expectedBounceTeam !== p.team && S.cooldown <= 0) {
     p.botThink = 1.1;
     const choices = ["dink", "slice", "drive", "lob"];
@@ -462,6 +509,10 @@ function simulateBall(dt) {
   S.ball.position.addScaledVector(S.velocity, dt);
   // Net collision: the ball must clear the tape while crossing the centre line.
   if ((previous.z < 0 && S.ball.position.z >= 0) || (previous.z > 0 && S.ball.position.z <= 0)) {
+    const receivingTeam = S.ball.position.z >= 0 ? 0 : 1;
+    for (const player of S.players) {
+      if (player.team === receivingTeam) player.splitStep = Math.max(player.splitStep || 0, .34);
+    }
     if (S.ball.position.y < .94 && Math.abs(S.ball.position.x) <= COURT.halfW + .1) {
       awardPoint(1 - S.lastHitTeam, "Bóng chạm lưới");
       return;
@@ -572,6 +623,10 @@ function performHit(shot, playerId, fromBot) {
   S.sideBounces = [0, 0];
   S.cooldown = .3;
   p.swing = 1; p.swingType = shot;
+  p.lunge = distance > .95 ? .56 : .3;
+  p.lungeSide = S.ball.position.x >= p.x ? 1 : -1;
+  p.lungeStrength = THREE.MathUtils.clamp((distance - .55) / 1.45, .32, 1);
+  p.lungeCooldown = .72;
   p.rotation = Math.atan2(-(targetX - p.x), -direction);
   if (p.mesh) p.mesh.rotation.y = p.rotation;
   S.rally++;
@@ -670,8 +725,13 @@ function broadcastSnapshot() {
   if (!S.host) return;
   const snapshot = {
     type: "snapshot",
-    players: S.players.map(p => ({ id: p.id, name: p.name, color: p.color, x: p.x, z: p.z,
-      rotation: p.rotation, team: p.team, slot: p.slot })),
+    players: S.players.map(p => ({
+      id: p.id, name: p.name, color: p.color, x: p.x, z: p.z,
+      rotation: p.rotation, team: p.team, slot: p.slot,
+      swing: p.swing || 0, swingType: p.swingType || "drive",
+      splitStep: p.splitStep || 0, lunge: p.lunge || 0,
+      lungeSide: p.lungeSide || 1, lungeStrength: p.lungeStrength || 1
+    })),
     score: S.score, servingTeam: S.servingTeam, serverIndex: S.serverIndex, serverNumber: S.serverNumber,
     rally: S.rally, phase: S.phase, expectedBounceTeam: S.expectedBounceTeam,
     twoBounceStep: S.twoBounceStep, serveActive: S.serveActive, sideBounces: S.sideBounces,
