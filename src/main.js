@@ -102,6 +102,7 @@ function setName(value) {
   if (local) local.name = S.name;
   updatePlayerLabels();
   syncPlayerUI();
+  syncScore();
 }
 function syncPlayerUI() {
   const list = $("#playerList");
@@ -675,6 +676,12 @@ function simulateBall(dt) {
 }
 function startServe(requestedBy = S.id) {
   if (S.mode === "online" && !S.host) {
+    const teamPlayers = S.players.filter(p => p.team === S.servingTeam);
+    const activeServer = teamPlayers[S.serverIndex % Math.max(1, teamPlayers.length)];
+    if (activeServer?.id !== S.id) {
+      toast("Chưa đến lượt giao bóng của bạn.");
+      return;
+    }
     sendToHost({ type: "serve" }); return;
   }
   if (S.phase !== "ready") { toast("Pha bóng hiện tại chưa kết thúc."); return; }
@@ -1001,6 +1008,9 @@ function attachConnection(conn, isGuest) {
       const teamPlayers = S.players.filter(p => p.team === S.servingTeam);
       const server = teamPlayers[S.serverIndex % Math.max(1, teamPlayers.length)];
       if (S.phase === "ready" && server?.id === conn.peer) startServe(conn.peer);
+      else conn.send({ type: "serveDenied", reason: "Chưa đến lượt giao bóng của bạn." });
+    } else if (message.type === "serveDenied" && !S.host) {
+      toast(message.reason || "Chưa đến lượt giao bóng.");
     } else if (message.type === "ping" && S.host) {
       if (Number.isFinite(message.sentAt)) conn.send({ type: "pong", sentAt: message.sentAt });
     } else if (message.type === "pong" && !S.host) {
