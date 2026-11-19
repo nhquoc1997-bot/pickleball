@@ -323,7 +323,7 @@ function updateGame(dt) {
     local.z = local.team === 0
       ? THREE.MathUtils.clamp(local.z + dz * speed * dt, 1.1, 6.05)
       : THREE.MathUtils.clamp(local.z + dz * speed * dt, -6.05, -1.1);
-    if (magnitude > .08) local.rotation = Math.atan2(dx, dz);
+    if (magnitude > .08) local.rotation = Math.atan2(-dx, -dz);
     local.moving = magnitude;
     if (local.mesh) {
       local.mesh.position.set(local.x, 0, local.z);
@@ -479,7 +479,7 @@ function performHit(shot, playerId, fromBot) {
   S.sideBounces = [0, 0];
   S.cooldown = .3;
   p.swing = 1; p.swingType = shot;
-  p.rotation = Math.atan2(targetX - p.x, direction);
+  p.rotation = Math.atan2(-(targetX - p.x), -direction);
   if (p.mesh) p.mesh.rotation.y = p.rotation;
   S.rally++;
   $("#gameStatus").textContent = spec.label;
