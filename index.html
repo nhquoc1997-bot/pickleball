@@ -106,7 +106,7 @@
                 </div>
               </div>
             </div>
-            <div class="game-bottomline"><span id="gameStatus">SẴN SÀNG · Chọn SERVE để bắt đầu</span><span>YOLO PICKLEBALL CLUB <b>●</b></span></div>
+            <div class="game-bottomline"><span id="gameStatus">SẴN SÀNG · Chọn SERVE để bắt đầu</span><div class="game-bottom-actions"><button id="statsButton" type="button">THỐNG KÊ</button><span>YOLO PICKLEBALL CLUB <b>●</b></span></div></div>
           </div>
 
           <aside class="game-sidebar">
@@ -159,7 +159,24 @@
       <button class="modal-close" id="closeProfileModal" type="button" aria-label="Đóng">×</button>
       <span class="eyebrow">PLAYER PROFILE</span><h2>TÊN CỦA BẠN.</h2><p>Tên này sẽ xuất hiện trong danh sách người chơi và trên lưng áo nhân vật.</p>
       <label class="input-label" for="profileNameInput">TÊN NGƯỜI CHƠI</label><input class="text-input" id="profileNameInput" maxlength="14" placeholder="Ví dụ: QUOC">
+      <div class="career-card">
+        <span class="eyebrow">CAREER RECORD</span>
+        <div class="career-grid">
+          <div><b id="careerMatches">0</b><small>TRẬN</small></div>
+          <div><b id="careerWins">0</b><small>CHIẾN THẮNG</small></div>
+          <div><b id="careerWinRate">—</b><small>TỈ LỆ THẮNG</small></div>
+        </div>
+        <p id="careerRecent">CHƯA CÓ TRẬN ĐẤU</p>
+      </div>
       <button class="button button-lime modal-submit" id="saveProfileButton" type="button">LƯU THÔNG TIN ↗</button>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="matchStatsModal" hidden>
+    <div class="modal-card stats-card">
+      <button class="modal-close" id="closeMatchStats" type="button" aria-label="Đóng">×</button>
+      <span class="eyebrow">YOLO MATCH CENTER</span><h2>THỐNG KÊ TRẬN.</h2>
+      <div id="matchStatsContent" class="match-stats-content"></div>
     </div>
   </div>
 
