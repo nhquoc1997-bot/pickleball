@@ -26,7 +26,10 @@ const S = {
   lastHitTeam: 0, ball: null, velocity: null, spin: null, magnus: null, shot: "drive", cooldown: 0,
   scene: null, camera: null, renderer: null, clock: new THREE.Clock(),
   rigTemplate: null, rigLoading: false, rigLoadFailed: false,
-  lastNet: 0, lastSnapshot: 0, pointTimer: null, disposed: false
+  lastNet: 0, lastSnapshot: 0, pointTimer: null, disposed: false,
+  inputSeq: 0, lastSnapshotSeq: 0, snapshotSeq: 0, lastPingAt: 0,
+  lastHostMessageAt: 0, rtt: 0, netBallTarget: null,
+  networkSession: 0, connectionLost: false
 };
 
 function toast(message) {
@@ -449,16 +452,16 @@ function updateGame(dt) {
       local.mesh.position.set(local.x, 0, local.z);
       local.mesh.rotation.y = local.rotation || 0;
     }
-    if (S.mode === "online" && !S.host && performance.now() - S.lastNet > 55) {
-      sendToHost({ type: "input", x: local.x, z: local.z, rotation: local.rotation });
+    if (S.mode === "online" && !S.host && S.networkReady && performance.now() - S.lastNet > 33) {
+      sendToHost({ type: "input", seq: ++S.inputSeq, x: local.x, z: local.z, rotation: local.rotation });
       S.lastNet = performance.now();
     }
   }
   for (const p of S.players) {
     if (p.targetX !== null && p.id !== S.id) {
       const previousX = p.x, previousZ = p.z;
-      p.x = THREE.MathUtils.damp(p.x, p.targetX, 12, dt);
-      p.z = THREE.MathUtils.damp(p.z, p.targetZ, 12, dt);
+      p.x = THREE.MathUtils.damp(p.x, p.targetX, 16, dt);
+      p.z = THREE.MathUtils.damp(p.z, p.targetZ, 16, dt);
       p.rotation = THREE.MathUtils.damp(p.rotation || 0, p.targetRotation || 0, 10, dt);
       p.velocityX = dt > 0 ? (p.x - previousX) / dt : 0;
       p.velocityZ = dt > 0 ? (p.z - previousZ) / dt : 0;
@@ -469,7 +472,25 @@ function updateGame(dt) {
     if (p.bot && S.hostOrTraining && S.phase === "rally") updateBot(p, dt);
     animatePlayer(p, dt, time);
   }
+  if (S.ball && S.mode === "online" && !S.host && S.netBallTarget) {
+    const blend = 1 - Math.exp(-22 * dt);
+    S.ball.position.lerp(S.netBallTarget, blend);
+  }
   if (S.ball && (S.host || S.mode === "training")) simulateBall(dt);
+  if (S.mode === "online" && !S.host && S.networkReady) {
+    const now = performance.now();
+    if (now - S.lastPingAt > 2000) {
+      sendToHost({ type: "ping", sentAt: now });
+      S.lastPingAt = now;
+    }
+    if (S.lastHostMessageAt && now - S.lastHostMessageAt > 7000 && !S.connectionLost) {
+      S.connectionLost = true;
+      S.networkReady = false;
+      $("#networkLabel").textContent = "MẤT TÍN HIỆU";
+      $("#gameStatus").textContent = "Không nhận được dữ liệu từ chủ phòng. Hãy kiểm tra kết nối.";
+      toast("Mất tín hiệu từ chủ phòng.");
+    }
+  }
   if (S.mode === "online" && S.host && performance.now() - S.lastSnapshot > 45) {
     broadcastSnapshot(); S.lastSnapshot = performance.now();
   }
@@ -806,20 +827,40 @@ joystick.addEventListener("pointercancel", resetJoystick);
 joystick.addEventListener("lostpointercapture", resetJoystick);
 
 function sendToHost(message) {
-  for (const conn of S.conns.values()) if (conn.open) conn.send(message);
+  for (const conn of S.conns.values()) {
+    if (!conn.open) continue;
+    try { conn.send(message); }
+    catch (error) { console.warn("Network send failed", error); }
+  }
+}
+function serializePlayers() {
+  return S.players.map(p => ({
+    id: p.id, name: p.name, color: p.color,
+    x: Number.isFinite(p.x) ? p.x : 0,
+    z: Number.isFinite(p.z) ? p.z : 0,
+    rotation: Number.isFinite(p.rotation) ? p.rotation : 0,
+    team: p.team, slot: p.slot,
+    swing: p.swing || 0, swingType: p.swingType || "drive",
+    splitStep: p.splitStep || 0, lunge: p.lunge || 0,
+    lungeSide: p.lungeSide || 1, lungeStrength: p.lungeStrength || 1
+  }));
+}
+function sendWelcome(conn) {
+  conn.send({
+    type: "welcome", players: serializePlayers(), score: [...S.score],
+    servingTeam: S.servingTeam, serverIndex: S.serverIndex,
+    serverNumber: S.serverNumber, hostId: S.id
+  });
 }
 function broadcastSnapshot() {
   if (!S.host) return;
   const snapshot = {
     type: "snapshot",
-    players: S.players.map(p => ({
-      id: p.id, name: p.name, color: p.color, x: p.x, z: p.z,
-      rotation: p.rotation, team: p.team, slot: p.slot,
-      swing: p.swing || 0, swingType: p.swingType || "drive",
-      splitStep: p.splitStep || 0, lunge: p.lunge || 0,
-      lungeSide: p.lungeSide || 1, lungeStrength: p.lungeStrength || 1
-    })),
-    score: S.score, servingTeam: S.servingTeam, serverIndex: S.serverIndex, serverNumber: S.serverNumber,
+    seq: ++S.snapshotSeq,
+    serverTime: Date.now(),
+    players: serializePlayers(),
+    /*PLAYER_SNAPSHOT_BLOCK_REMOVED*/
+    score: [...S.score], servingTeam: S.servingTeam, serverIndex: S.serverIndex, serverNumber: S.serverNumber,
     rally: S.rally, phase: S.phase, expectedBounceTeam: S.expectedBounceTeam,
     twoBounceStep: S.twoBounceStep, serveActive: S.serveActive, sideBounces: S.sideBounces,
     ball: S.ball ? { x: S.ball.position.x, y: S.ball.position.y, z: S.ball.position.z,
@@ -827,49 +868,102 @@ function broadcastSnapshot() {
       sx: S.spin?.x || 0, sy: S.spin?.y || 0, sz: S.spin?.z || 0 } : null,
     status: $("#gameStatus").textContent
   };
-  sendToHost(snapshot);
+  for (const conn of S.conns.values()) {
+    if (!conn.open) continue;
+    const buffered = conn.dataChannel?.bufferedAmount || 0;
+    if (buffered > 128 * 1024) continue;
+    try { conn.send(snapshot); }
+    catch (error) { console.warn("Snapshot send failed", error); }
+  }
 }
 function attachConnection(conn, isGuest) {
+  const session = S.networkSession;
+  let joined = false;
+  let handshakeTimer = null;
   conn.on("open", () => {
+    if (session !== S.networkSession) return;
     S.conns.set(conn.peer, conn);
     if (isGuest) {
+      S.networkReady = false;
+      S.connectionLost = false;
+      S.lastHostMessageAt = performance.now();
+      handshakeTimer = setTimeout(() => {
+        if (session !== S.networkSession || S.networkReady || !conn.open) return;
+        $("#gameStatus").textContent = "Không nhận được phản hồi từ chủ phòng.";
+        toast("Kết nối phòng quá thời gian.");
+        conn.close();
+      }, 15000);
       conn.send({ type: "join", name: S.name, color: S.color });
     } else {
-      const player = S.players.find(p => p.id === conn.peer);
-      if (player) conn.send({ type: "welcome", players: S.players, score: S.score,
-        servingTeam: S.servingTeam, serverIndex: S.serverIndex, serverNumber: S.serverNumber, hostId: S.id });
+      handshakeTimer = setTimeout(() => {
+        if (session === S.networkSession && !joined && conn.open) conn.close();
+      }, 12000);
+      sendWelcome(conn);
       broadcastSnapshot();
     }
   });
   conn.on("data", message => {
-    if (!message || !message.type) return;
+    if (session !== S.networkSession || !message || !message.type) return;
+    if (isGuest) S.lastHostMessageAt = performance.now();
     if (message.type === "join" && S.host) {
       const player = S.players.find(p => p.id === conn.peer);
-      if (player) { player.name = cleanName(message.name); player.color = message.color || "#70c5e8"; }
-      conn.send({ type: "welcome", players: S.players, score: S.score,
-        servingTeam: S.servingTeam, serverIndex: S.serverIndex, hostId: S.id });
+      if (player) {
+        joined = true;
+        clearTimeout(handshakeTimer);
+        player.name = cleanName(message.name);
+        player.color = typeof message.color === "string" && /^#[0-9a-f]{6}$/i.test(message.color)
+          ? message.color : "#70c5e8";
+      }
+      sendWelcome(conn);
       updateMeshes(); broadcastSnapshot();
     } else if (message.type === "input" && S.host) {
       const player = S.players.find(p => p.id === conn.peer);
-      if (player) {
-        player.targetX = THREE.MathUtils.clamp(message.x, -2.55, 2.55);
-        player.targetZ = player.team === 0
-          ? THREE.MathUtils.clamp(message.z, 1.1, 6.05)
-          : THREE.MathUtils.clamp(message.z, -6.05, -1.1);
-        player.targetRotation = message.rotation || 0;
+      if (player && Number.isFinite(message.x) && Number.isFinite(message.z)) {
+        const seq = Number.isSafeInteger(message.seq) ? message.seq : (player.lastInputSeq || 0) + 1;
+        if (seq > (player.lastInputSeq || 0)) {
+          player.lastInputSeq = seq;
+          player.targetX = THREE.MathUtils.clamp(message.x, -2.55, 2.55);
+          player.targetZ = player.team === 0
+            ? THREE.MathUtils.clamp(message.z, 1.1, 6.05)
+            : THREE.MathUtils.clamp(message.z, -6.05, -1.1);
+          player.targetRotation = Number.isFinite(message.rotation)
+            ? THREE.MathUtils.clamp(message.rotation, -Math.PI, Math.PI)
+            : (player.targetRotation || 0);
+        }
       }
     } else if (message.type === "shot" && S.host) {
-      performHit(message.shot, conn.peer, false);
+      if (Object.prototype.hasOwnProperty.call(SHOTS, message.shot)) performHit(message.shot, conn.peer, false);
     } else if (message.type === "serve" && S.host) {
-      startServe();
+      const teamPlayers = S.players.filter(p => p.team === S.servingTeam);
+      const server = teamPlayers[S.serverIndex % Math.max(1, teamPlayers.length)];
+      if (S.phase === "ready" && server?.id === conn.peer) startServe();
+    } else if (message.type === "ping" && S.host) {
+      if (Number.isFinite(message.sentAt)) conn.send({ type: "pong", sentAt: message.sentAt });
+    } else if (message.type === "pong" && !S.host) {
+      if (Number.isFinite(message.sentAt)) {
+        S.rtt = Math.max(0, performance.now() - message.sentAt);
+        $("#networkLabel").textContent = "PHÒNG ONLINE · " + Math.round(S.rtt) + "ms";
+      }
     } else if (message.type === "welcome" && !S.host) {
+      clearTimeout(handshakeTimer);
+      S.networkReady = true;
+      S.connectionLost = false;
+      S.lastHostMessageAt = performance.now();
+      S.lastPingAt = 0;
       mergePlayers(message.players || S.players, true);
       S.score = message.score || [0, 0];
-      S.servingTeam = message.servingTeam || 0;
+      S.servingTeam = message.servingTeam ?? 0;
       S.serverIndex = message.serverIndex ?? 0;
       S.serverNumber = message.serverNumber ?? 1;
+      $("#networkLabel").textContent = "PHÒNG ONLINE · ĐÃ KẾT NỐI";
+      $("#gameStatus").textContent = "ĐÃ KẾT NỐI · ĐANG ĐỒNG BỘ TRẬN ĐẤU";
       syncScore(); updateMeshes();
     } else if (message.type === "snapshot" && !S.host) {
+      if (Number.isSafeInteger(message.seq) && message.seq <= S.lastSnapshotSeq) return;
+      if (Number.isSafeInteger(message.seq)) S.lastSnapshotSeq = message.seq;
+      S.networkReady = true;
+      S.connectionLost = false;
+      S.lastHostMessageAt = performance.now();
       mergePlayers(message.players || S.players);
       S.score = message.score || S.score;
       S.servingTeam = message.servingTeam ?? S.servingTeam;
@@ -882,31 +976,52 @@ function attachConnection(conn, isGuest) {
       S.serveActive = message.serveActive ?? S.serveActive;
       S.sideBounces = message.sideBounces || [0, 0];
       if (message.ball && S.ball) {
-        S.ball.position.set(message.ball.x, message.ball.y, message.ball.z);
+        S.netBallTarget = new THREE.Vector3(message.ball.x, message.ball.y, message.ball.z);
         S.velocity.set(message.ball.vx || 0, message.ball.vy || 0, message.ball.vz || 0);
         S.spin?.set(message.ball.sx || 0, message.ball.sy || 0, message.ball.sz || 0);
       }
       $("#gameStatus").textContent = message.status || "";
       syncScore(); updateMeshes();
     } else if (message.type === "full") {
+      S.networkReady = false;
+      S.connectionLost = true;
+      $("#gameStatus").textContent = "PHÒNG ĐÃ ĐỦ 4 NGƯỜI";
       toast("Phòng đã đủ 4 người."); conn.close();
     }
   });
   conn.on("close", () => {
+    if (session !== S.networkSession) return;
+    clearTimeout(handshakeTimer);
     S.conns.delete(conn.peer);
     if (S.host) {
       S.players = S.players.filter(p => p.id !== conn.peer);
       updateMeshes(); broadcastSnapshot();
+    } else {
+      S.networkReady = false;
+      if (!S.connectionLost) {
+        S.connectionLost = true;
+        $("#networkLabel").textContent = "MẤT KẾT NỐI";
+        $("#gameStatus").textContent = "Mất kết nối với chủ phòng. Hãy quay về sảnh và tham gia lại.";
+        toast("Đã mất kết nối với chủ phòng.");
+      }
     }
   });
-  conn.on("error", error => console.warn("Peer connection error", error));
+  conn.on("error", error => {
+    console.warn("Peer connection error", error);
+    if (session === S.networkSession && !S.host) {
+      $("#networkLabel").textContent = "LỖI KẾT NỐI";
+      $("#gameStatus").textContent = "Kết nối không ổn định. Hãy thử tham gia lại phòng.";
+    }
+  });
 }
 function leaveNetwork() {
   clearTimeout(S.pointTimer);
+  S.networkSession++;
   for (const conn of S.conns.values()) try { conn.close(); } catch {}
   S.conns.clear();
   if (S.peer) { try { S.peer.destroy(); } catch {} S.peer = null; }
-  S.host = false; S.networkReady = false;
+  S.host = false; S.networkReady = false; S.connectionLost = false;
+  S.netBallTarget = null; S.lastHostMessageAt = 0; S.lastSnapshotSeq = 0;
 }
 function startTraining() {
   leaveNetwork();
@@ -919,6 +1034,7 @@ function startTraining() {
   ];
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.rally = 0;
   S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.serveActive = false; S.sideBounces = [0, 0];
+  $("#networkLabel").textContent = "CHẾ ĐỘ LUYỆN TẬP";
   syncScore(); $("#roomCodeLabel").textContent = "TRAINING";
   $("#networkLabel").textContent = "CHẾ ĐỘ LUYỆN TẬP";
   $("#gameStatus").textContent = "SẴN SÀNG · Nhấn SERVE để bắt đầu";
@@ -926,7 +1042,8 @@ function startTraining() {
 }
 function createRoom() {
   leaveNetwork();
-  S.mode = "online"; S.host = true; S.code = String(Math.floor(1000 + Math.random() * 9000));
+  S.mode = "online"; S.host = true; S.networkReady = false; S.connectionLost = false;
+  S.snapshotSeq = 0; S.code = String(Math.floor(1000 + Math.random() * 9000));
   S.id = "host";
   S.players = [createPlayer(0, S.id, S.name, S.color)];
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.rally = 0;
@@ -942,7 +1059,7 @@ function createRoom() {
     const host = S.players.find(p => p.slot === 0); if (host) host.id = id;
     updateMeshes();
     S.networkReady = true;
-    $("#networkLabel").textContent = "PHÒNG ONLINE";
+    $("#networkLabel").textContent = "PHÒNG ONLINE · CHỦ PHÒNG";
     $("#gameStatus").textContent = "PHÒNG ĐÃ MỞ · Chia sẻ mã YOLO-" + S.code;
     toast("Đã tạo phòng YOLO-" + S.code);
   });
@@ -964,7 +1081,9 @@ function joinRoom() {
   const code = $("#joinCodeInput").value.replace(/[^0-9]/g, "").slice(0, 4);
   if (code.length !== 4) { toast("Mã phòng cần đủ 4 chữ số."); return; }
   leaveNetwork();
-  S.mode = "online"; S.host = false; S.code = code; S.id = "joining";
+  S.mode = "online"; S.host = false; S.networkReady = false; S.connectionLost = false;
+  S.inputSeq = 0; S.lastSnapshotSeq = 0; S.lastPingAt = 0; S.rtt = 0;
+  S.code = code; S.id = "joining"; S.netBallTarget = null;
   S.players = [createPlayer(0, S.id, S.name, S.color)];
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.phase = "ready"; S.twoBounceStep = 0; S.serveActive = false;
   $("#roomCodeLabel").textContent = "YOLO-" + code;
