@@ -10,12 +10,12 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const COURT = { width: 6.1, length: 13.41, halfW: 3.05, halfL: 6.705, kitchen: 2.13 };
 const SHOTS = {
-  dink:   { speed: 4.7, lift: 3.1, label: "DINK · Bóng mềm qua kitchen" },
-  slice:  { speed: 6.5, lift: 2.0, label: "SLICE · Cắt bóng tạo xoáy" },
-  lob:    { speed: 5.3, lift: 7.6, label: "LOB · Bóng bổng qua đầu" },
-  volley: { speed: 8.4, lift: 2.6, label: "VOLLEY · Đánh bóng trên không" },
-  drive:  { speed: 10.0, lift: 2.2, label: "DRIVE · Đánh nhanh" },
-  smash:  { speed: 12.0, lift: 3.3, label: "SMASH · Đập bóng" }
+  dink:   { speed: 4.7, lift: 3.1, topspin: 1.5, sidespin: 0, label: "DINK · Bóng mềm qua kitchen" },
+  slice:  { speed: 6.5, lift: 2.0, topspin: -2.2, sidespin: 8.5, label: "SLICE · Cắt bóng tạo xoáy" },
+  lob:    { speed: 5.3, lift: 7.6, topspin: -1.2, sidespin: .5, label: "LOB · Bóng bổng qua đầu" },
+  volley: { speed: 8.4, lift: 2.6, topspin: 3.5, sidespin: 0, label: "VOLLEY · Đánh bóng trên không" },
+  drive:  { speed: 10.0, lift: 2.2, topspin: 8.5, sidespin: .8, label: "DRIVE · Đánh nhanh" },
+  smash:  { speed: 12.0, lift: 3.3, topspin: 12, sidespin: 0, label: "SMASH · Đập bóng" }
 };
 const S = {
   name: "YOLO PLAYER", color: "#c7f36b", mode: "training", code: "TRAINING",
@@ -23,7 +23,7 @@ const S = {
   players: [], id: "local", keys: new Set(), joy: { x: 0, z: 0 },
   score: [0, 0], servingTeam: 0, serverIndex: 1, serverNumber: 2, rally: 0,
   phase: "ready", expectedBounceTeam: null, twoBounceStep: 0, serveActive: false, sideBounces: [0, 0],
-  lastHitTeam: 0, ball: null, velocity: null, shot: "drive", cooldown: 0,
+  lastHitTeam: 0, ball: null, velocity: null, spin: null, magnus: null, shot: "drive", cooldown: 0,
   scene: null, camera: null, renderer: null, clock: new THREE.Clock(),
   rigTemplate: null, rigLoading: false, rigLoadFailed: false,
   lastNet: 0, lastSnapshot: 0, pointTimer: null, disposed: false
@@ -55,8 +55,22 @@ function syncScore() {
 function cleanName(value) {
   return (value || "YOLO PLAYER").trim().replace(/[<>]/g, "").slice(0, 14).toUpperCase() || "YOLO PLAYER";
 }
+function loadSavedProfile() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("yolo-pickleball-profile") || "null");
+    if (saved && typeof saved === "object") {
+      if (typeof saved.name === "string") S.name = cleanName(saved.name);
+      if (typeof saved.color === "string" && /^#[0-9a-f]{6}$/i.test(saved.color)) S.color = saved.color;
+    }
+  } catch {}
+}
+function saveProfile() {
+  try { localStorage.setItem("yolo-pickleball-profile", JSON.stringify({ name: S.name, color: S.color })); }
+  catch {}
+}
 function setName(value) {
   S.name = cleanName(value);
+  saveProfile();
   $("#playerDisplayName").textContent = S.name;
   $("#sidebarPlayerName").textContent = S.name;
   $("#playerAvatar").textContent = S.name[0];
@@ -343,6 +357,8 @@ function initScene() {
     new THREE.MeshStandardMaterial({ color: 0xdfff55, roughness: .5, emissive: 0x536b13, emissiveIntensity: .25 }));
   S.ball.castShadow = true; S.ball.position.set(0, .12, 3.7); S.scene.add(S.ball);
   S.velocity = new THREE.Vector3();
+  S.spin = new THREE.Vector3();
+  S.magnus = new THREE.Vector3();
   updateMeshes(); resizeRenderer();
   loadRiggedAthletes();
   $("#loadingScene").classList.add("done");
@@ -505,28 +521,61 @@ function updateBot(p, dt) {
 function simulateBall(dt) {
   if (S.phase !== "rally" || !S.ball || !S.velocity) return;
   const previous = S.ball.position.clone();
+
+  // A perforated pickleball loses speed quickly in flight. Spin adds a small Magnus curve.
+  const speed = S.velocity.length();
+  const drag = .0014 * speed;
+  S.velocity.addScaledVector(S.velocity, -drag * dt);
+  if (S.spin && S.spin.lengthSq() > .01) {
+    S.magnus.crossVectors(S.spin, S.velocity).multiplyScalar(.0015);
+    S.velocity.addScaledVector(S.magnus, dt);
+    S.spin.multiplyScalar(Math.exp(-1.05 * dt));
+  }
   S.velocity.y -= 9.81 * dt;
   S.ball.position.addScaledVector(S.velocity, dt);
-  // Net collision: the ball must clear the tape while crossing the centre line.
-  if ((previous.z < 0 && S.ball.position.z >= 0) || (previous.z > 0 && S.ball.position.z <= 0)) {
+  S.ball.rotation.x += (S.spin?.x || 0) * dt;
+  S.ball.rotation.y += (S.spin?.y || 0) * dt;
+  S.ball.rotation.z += (S.spin?.z || 0) * dt;
+
+  // Test the exact crossing point against the top of the net and its tape.
+  const crossedNet = (previous.z < 0 && S.ball.position.z >= 0)
+    || (previous.z > 0 && S.ball.position.z <= 0);
+  if (crossedNet) {
+    const fraction = THREE.MathUtils.clamp(
+      -previous.z / (S.ball.position.z - previous.z || 1), 0, 1
+    );
+    const crossingX = THREE.MathUtils.lerp(previous.x, S.ball.position.x, fraction);
+    const crossingY = THREE.MathUtils.lerp(previous.y, S.ball.position.y, fraction);
     const receivingTeam = S.ball.position.z >= 0 ? 0 : 1;
     for (const player of S.players) {
       if (player.team === receivingTeam) player.splitStep = Math.max(player.splitStep || 0, .34);
     }
-    if (S.ball.position.y < .94 && Math.abs(S.ball.position.x) <= COURT.halfW + .1) {
+    // Net tape is about 1.0 m high; include the ball's 10.5 cm radius.
+    if (crossingY < 1.08 && Math.abs(crossingX) <= COURT.halfW + .12) {
       awardPoint(1 - S.lastHitTeam, "Bóng chạm lưới");
       return;
     }
   }
-  // A ball landing beyond the lines is out.
+
   if (Math.abs(S.ball.position.x) > COURT.halfW + .18 || Math.abs(S.ball.position.z) > COURT.halfL + .18) {
     awardPoint(1 - S.lastHitTeam, "Bóng ra ngoài");
     return;
   }
+
+  // Court contact: absorb horizontal energy, transfer a little spin, then rebound.
   if (S.ball.position.y <= .105 && S.velocity.y < 0) {
     S.ball.position.y = .105;
-    S.velocity.y = Math.abs(S.velocity.y) * .68;
-    if (S.velocity.y < .65) S.velocity.y = 0;
+    const impactSpeed = Math.abs(S.velocity.y);
+    S.velocity.y = impactSpeed > .9 ? impactSpeed * .57 : 0;
+    S.velocity.x *= .84;
+    S.velocity.z *= .84;
+    if (S.spin) {
+      S.velocity.x += S.spin.y * .004;
+      S.velocity.z -= S.spin.x * .002;
+      S.spin.multiplyScalar(.58);
+    }
+    if (S.velocity.y < .82) S.velocity.y = 0;
+
     const side = S.ball.position.z >= 0 ? 0 : 1;
     S.sideBounces[side] += 1;
     if (S.serveActive) {
@@ -551,8 +600,17 @@ function simulateBall(dt) {
       ? "DOUBLE BOUNCE RULE ĐÃ HOÀN TẤT · Có thể volley"
       : "Bóng đã nảy · Tiếp tục pha bóng";
   }
-  if (S.mode === "online" && S.host && S.velocity.lengthSq() < .05) {
-    awardPoint(1 - S.lastHitTeam, "Bóng không được trả lại");
+
+  // A ball that has settled on the court rolls to a stop instead of hovering forever.
+  if (S.ball.position.y <= .106 && Math.abs(S.velocity.y) < .02) {
+    const rollingFriction = Math.exp(-1.65 * dt);
+    S.velocity.x *= rollingFriction;
+    S.velocity.z *= rollingFriction;
+    S.velocity.y = 0;
+    if (Math.hypot(S.velocity.x, S.velocity.z) < .28) {
+      S.velocity.set(0, 0, 0);
+      awardPoint(1 - S.lastHitTeam, "Bóng không được trả lại");
+    }
   }
 }
 function startServe() {
@@ -575,6 +633,7 @@ function startServe() {
   const targetX = -server.x * .55;
   S.ball.position.set(server.x, 1.25, server.z - direction * .15);
   S.velocity.set((targetX - server.x) * .65, 5.4, direction * 8.0);
+  S.spin?.set(direction * 2.4, server.x > 0 ? -1.2 : 1.2, 0);
   S.phase = "rally"; S.rally = 0; S.twoBounceStep = 0; S.sideBounces = [0, 0];
   S.expectedBounceTeam = 1 - server.team; S.serveActive = true; S.serveTargetX = targetX;
   S.lastHitTeam = server.team; S.cooldown = .25;
@@ -589,6 +648,21 @@ function attemptShot(shot, playerId = S.id) {
   }
   performHit(shot, playerId, false);
 }
+function paddleContactDistance(player) {
+  const paddle = player.mesh?.userData?.paddle;
+  if (paddle && player.mesh) {
+    player.mesh.updateWorldMatrix(true, true);
+    const contact = new THREE.Vector3();
+    paddle.getWorldPosition(contact);
+    return S.ball.position.distanceTo(contact);
+  }
+  const angle = player.rotation || 0;
+  const forwardX = -Math.sin(angle), forwardZ = -Math.cos(angle);
+  const rightX = Math.cos(angle), rightZ = -Math.sin(angle);
+  const contactX = player.x + forwardX * .52 + rightX * .24;
+  const contactZ = player.z + forwardZ * .52 + rightZ * .24;
+  return Math.hypot(S.ball.position.x - contactX, S.ball.position.y - 1.02, S.ball.position.z - contactZ);
+}
 function performHit(shot, playerId, fromBot) {
   if (S.phase !== "rally" || S.cooldown > 0) return;
   const p = S.players.find(x => x.id === playerId);
@@ -598,16 +672,17 @@ function performHit(shot, playerId, fromBot) {
     if (!fromBot) toast("Bóng đang ở phần sân đối phương.");
     return;
   }
-  const distance = Math.hypot(S.ball.position.x - p.x, S.ball.position.z - p.z);
-  if (distance > 2.15 || S.ball.position.y > 3.4) {
-    if (!fromBot) toast("Di chuyển đến gần bóng hơn để thực hiện cú đánh.");
+  const bodyDistance = Math.hypot(S.ball.position.x - p.x, S.ball.position.z - p.z);
+  const contactDistance = paddleContactDistance(p);
+  const contactLimit = 1.34 + THREE.MathUtils.clamp((S.ball.position.y - .8) * .08, 0, .18);
+  if (bodyDistance > 2.05 || contactDistance > contactLimit || S.ball.position.y > 3.1) {
+    if (!fromBot) toast("Đưa vợt đến gần bóng hơn để chạm bóng.");
     return;
   }
   if (S.expectedBounceTeam === p.team) {
     awardPoint(1 - p.team, "Vi phạm luật bóng phải nảy");
     return;
   }
-  // Volleying while standing in the non-volley zone is a fault.
   const inKitchen = p.team === 0 ? p.z < COURT.kitchen : p.z > -COURT.kitchen;
   if (shot === "volley" && inKitchen) {
     awardPoint(1 - p.team, "Volley trong vùng Kitchen");
@@ -616,16 +691,21 @@ function performHit(shot, playerId, fromBot) {
   const spec = SHOTS[shot] || SHOTS.drive;
   const direction = p.team === 0 ? -1 : 1;
   const targetX = THREE.MathUtils.clamp(-p.x * .55 + (Math.random() - .5) * 1.8, -2.5, 2.5);
-  const lateral = (targetX - S.ball.position.x) * .45;
-  S.velocity.set(lateral + (shot === "slice" ? .8 : 0), spec.lift, direction * spec.speed);
+  const lateral = (targetX - S.ball.position.x) * .45 + (shot === "slice" ? .45 : 0);
+  S.velocity.set(lateral, spec.lift, direction * spec.speed);
+  S.spin?.set(
+    direction * spec.topspin,
+    (spec.sidespin || 0) * Math.sign(targetX - p.x || 1),
+    0
+  );
   S.ball.position.y = Math.max(S.ball.position.y, .32);
   S.lastHitTeam = p.team;
   S.sideBounces = [0, 0];
-  S.cooldown = .3;
+  S.cooldown = .22;
   p.swing = 1; p.swingType = shot;
-  p.lunge = distance > .95 ? .56 : .3;
+  p.lunge = bodyDistance > .95 ? .56 : .3;
   p.lungeSide = S.ball.position.x >= p.x ? 1 : -1;
-  p.lungeStrength = THREE.MathUtils.clamp((distance - .55) / 1.45, .32, 1);
+  p.lungeStrength = THREE.MathUtils.clamp((bodyDistance - .55) / 1.45, .32, 1);
   p.lungeCooldown = .72;
   p.rotation = Math.atan2(-(targetX - p.x), -direction);
   if (p.mesh) p.mesh.rotation.y = p.rotation;
@@ -637,6 +717,7 @@ function awardPoint(winner, reason) {
   if (S.phase !== "rally") return;
   S.phase = "point";
   S.velocity.set(0, 0, 0);
+  S.spin?.set(0, 0, 0);
   if (winner === S.servingTeam) {
     // The same server keeps serving when their team wins the rally.
     S.score[winner] += 1;
@@ -704,10 +785,15 @@ let joyPointer = null;
 function moveJoystick(e) {
   const r = joystick.getBoundingClientRect();
   let x = e.clientX - (r.left + r.width / 2), y = e.clientY - (r.top + r.height / 2);
-  const max = 32, len = Math.hypot(x, y);
+  const max = Math.min((r.width - 44) / 2, 40);
+  const len = Math.hypot(x, y);
   if (len > max) { x = x / len * max; y = y / len * max; }
+  const rawX = x / max, rawY = y / max;
+  const magnitude = Math.hypot(rawX, rawY);
+  const deadzone = .12;
+  const scale = magnitude > deadzone ? (magnitude - deadzone) / (1 - deadzone) / magnitude : 0;
   knob.style.transform = "translate(" + x + "px," + y + "px)";
-  S.joy.x = x / max; S.joy.z = y / max;
+  S.joy.x = rawX * scale; S.joy.z = rawY * scale;
 }
 joystick.addEventListener("pointerdown", e => { joyPointer = e.pointerId; joystick.setPointerCapture(e.pointerId); moveJoystick(e); });
 joystick.addEventListener("pointermove", e => { if (joyPointer === e.pointerId) moveJoystick(e); });
@@ -717,6 +803,7 @@ function resetJoystick(e) {
 }
 joystick.addEventListener("pointerup", resetJoystick);
 joystick.addEventListener("pointercancel", resetJoystick);
+joystick.addEventListener("lostpointercapture", resetJoystick);
 
 function sendToHost(message) {
   for (const conn of S.conns.values()) if (conn.open) conn.send(message);
@@ -736,7 +823,8 @@ function broadcastSnapshot() {
     rally: S.rally, phase: S.phase, expectedBounceTeam: S.expectedBounceTeam,
     twoBounceStep: S.twoBounceStep, serveActive: S.serveActive, sideBounces: S.sideBounces,
     ball: S.ball ? { x: S.ball.position.x, y: S.ball.position.y, z: S.ball.position.z,
-      vx: S.velocity.x, vy: S.velocity.y, vz: S.velocity.z } : null,
+      vx: S.velocity.x, vy: S.velocity.y, vz: S.velocity.z,
+      sx: S.spin?.x || 0, sy: S.spin?.y || 0, sz: S.spin?.z || 0 } : null,
     status: $("#gameStatus").textContent
   };
   sendToHost(snapshot);
@@ -796,6 +884,7 @@ function attachConnection(conn, isGuest) {
       if (message.ball && S.ball) {
         S.ball.position.set(message.ball.x, message.ball.y, message.ball.z);
         S.velocity.set(message.ball.vx || 0, message.ball.vy || 0, message.ball.vz || 0);
+        S.spin?.set(message.ball.sx || 0, message.ball.sy || 0, message.ball.sz || 0);
       }
       $("#gameStatus").textContent = message.status || "";
       syncScore(); updateMeshes();
@@ -917,10 +1006,14 @@ $("#copyRoomButton").onclick = async () => {
 $$(".color-dot").forEach(btn => btn.onclick = () => {
   $$(".color-dot").forEach(x => x.classList.remove("selected"));
   btn.classList.add("selected"); S.color = btn.dataset.color;
+  saveProfile();
   document.documentElement.style.setProperty("--shirt", S.color);
   const local = S.players.find(p => p.id === S.id); if (local) local.color = S.color;
   updatePlayerLabels();
 });
 document.addEventListener("visibilitychange", () => { if (document.hidden) S.keys.clear(); });
+loadSavedProfile();
+document.documentElement.style.setProperty("--shirt", S.color);
+$(".color-dot").forEach(btn => btn.classList.toggle("selected", btn.dataset.color === S.color));
 setName(S.name);
 syncPlayerUI();
