@@ -854,7 +854,7 @@ function simulateBall(dt) {
       });
       S.serveActive = false;
       if (!inCorrectServiceArea) {
-        awardPoint(1 - S.servingTeam, "Giao bóng lỗi: phải vào đúng ô chéo, ngoài Kitchen");
+        awardPoint(1 - S.servingTeam, "Giao bóng lỗi: phải vào đúng ô chéo, ngoài Kitchen", S.lastHitPlayerId);
         return;
       }
     }
@@ -863,7 +863,12 @@ function simulateBall(dt) {
       S.expectedBounceTeam = S.twoBounceStep === 1 ? 1 - side : null;
     }
     if (S.sideBounces[side] >= 2) {
-      awardPoint(1 - side, "Bóng nảy hai lần");
+      const faultPlayer = S.players.reduce((best, player) => {
+        if (player.team !== side) return best;
+        const distance = Math.hypot(player.x - S.ball.position.x, player.z - S.ball.position.z);
+        return !best || distance < best.distance ? { id: player.id, distance } : best;
+      }, null);
+      awardPoint(1 - side, "Bóng nảy hai lần", faultPlayer?.id || null);
       return;
     }
     $("#gameStatus").textContent = S.expectedBounceTeam === null
@@ -879,7 +884,13 @@ function simulateBall(dt) {
     S.velocity.y = 0;
     if (Math.hypot(S.velocity.x, S.velocity.z) < .28) {
       S.velocity.set(0, 0, 0);
-      awardPoint(1 - S.lastHitTeam, "Bóng không được trả lại");
+      const defendingTeam = 1 - S.lastHitTeam;
+      const faultPlayer = S.players.reduce((best, player) => {
+        if (player.team !== defendingTeam) return best;
+        const distance = Math.hypot(player.x - S.ball.position.x, player.z - S.ball.position.z);
+        return !best || distance < best.distance ? { id: player.id, distance } : best;
+      }, null);
+      awardPoint(1 - S.lastHitTeam, "Bóng không được trả lại", faultPlayer?.id || null);
     }
   }
 }
