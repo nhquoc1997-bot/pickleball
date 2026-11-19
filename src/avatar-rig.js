@@ -251,7 +251,9 @@ function boneOverlay(q, bone, x, y, z) {
   if (!bone) return;
   const offset = new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z));
   bone.quaternion.multiply(offset);
-  q.lastOverlay.set(bone, offset);
+  const previous = q.lastOverlay.get(bone);
+  if (previous) previous.multiply(offset);
+  else q.lastOverlay.set(bone, offset.clone());
 }
 
 function updateBlink(q, time) {
