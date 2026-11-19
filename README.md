@@ -20,7 +20,10 @@ Serve the repository root with any static web server (for example VS Code Live S
 - Validate player movement values and shot types on the host, restrict serve requests to the active server, time out incomplete joins, and report disconnected guests clearly.
 - Spin-aware ball flight with aerodynamic drag, Magnus curve, topspin/sidespin profiles per shot, energy loss on court bounce and ground rolling friction.
 - Paddle-centred contact window using the rendered paddle position, with height-aware reach checks; online snapshots synchronize ball spin.
-- Prototype serve sequence, two-bounce requirement, non-volley-zone volley fault and side-out-style scoring to 11, win by 2.
+- V7 doubles rules engine: official three-part score call (serving score–receiving score–server number), server 1/server 2 rotation, side-out selection from the right service court, and partner side-switches after a serving point.
+- Serve starts behind the baseline and is validated against the diagonal service box, sidelines, baseline and Kitchen; a net-touching serve remains live if it lands legally.
+- Two-bounce rule tracks actual court bounces; Kitchen faults are based on a true airborne volley rather than the selected shot label, including a short follow-through check for momentum into the Kitchen.
+- Match ends at 11 points with a two-point lead; final score and winner are displayed to every connected player.
 - Loading progress and automatic fallback to the procedural avatar if the external GLB cannot be reached.
 
 ## Athlete asset and licensing
@@ -35,7 +38,7 @@ This is still a prototype, not a production multiplayer game or a certified rule
 - PeerJS uses public signaling and direct peer connections. V6 adds heartbeat/latency checks and clearer disconnect handling, but NAT/firewall restrictions can still prevent some players from connecting; there is no TURN relay.
 - The host browser currently acts as the game authority. Guests are notified when the host connection is lost, but there is no host migration or automatic rejoin; if the host closes the tab, the room ends.
 - No persistent user accounts, matchmaking, moderation, anti-cheat, robust reconnect, spectator mode or dedicated authoritative server is included.
-- Scoring and serve handling are simplified. Full official doubles service sequence, faults, let serves, kitchen momentum rules, line calls and tournament edge cases still require implementation and testing.
+- V7 covers the core recreational doubles score/serve sequence, diagonal service-box landing, no-let serves and Kitchen volley/momentum faults, with automated unit tests for the pure rules. It is not a certified tournament rules engine: foot-fault timing, referee line calls, hinder/replay cases, stacking/position exceptions and tournament-specific formats still need implementation and live validation.
 - Physics is still an arcade approximation: spin, drag and bounce are implemented but not calibrated against measured ball data. Paddle contact uses a 3D proximity window around the paddle rather than a full rigid-body racket collision.
 
 For public launch, move to an authoritative WebSocket server (e.g. Colyseus), add TURN relay, server-side physics and validated rules, room lifecycle/reconnect handling, authentication, monitoring and load testing. For the next animation milestone, replace the procedural swing overlays with pickleball-specific motion-capture clips retargeted to this rig.
