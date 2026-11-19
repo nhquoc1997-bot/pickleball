@@ -16,7 +16,7 @@ const S = {
   peer: null, conns: new Map(), host: false, networkReady: false,
   players: [], id: "local", keys: new Set(), joy: { x: 0, z: 0 },
   score: [0, 0], servingTeam: 0, serverIndex: 0, rally: 0,
-  phase: "ready", expectedBounceTeam: null, twoBounceStep: 0, sideBounces: [0, 0],
+  phase: "ready", expectedBounceTeam: null, twoBounceStep: 0, serveActive: false, sideBounces: [0, 0],
   lastHitTeam: 0, ball: null, velocity: null, shot: "drive", cooldown: 0,
   scene: null, camera: null, renderer: null, clock: new THREE.Clock(),
   lastNet: 0, lastSnapshot: 0, pointTimer: null, disposed: false
@@ -87,16 +87,16 @@ function createPlayer(slot, id, name, color) {
     targetX: null, targetZ: null, targetRotation: null, mesh: null,
     swing: 0, swingType: "drive", bot: false, botThink: 0 };
 }
-function mergePlayers(incoming) {
+function mergePlayers(incoming, snap = false) {
   const previous = new Map(S.players.map(p => [p.id, p]));
   S.players = (incoming || []).map(data => {
     const existing = previous.get(data.id);
     if (existing) {
-      Object.assign(existing, {
-        name: data.name, color: data.color, x: data.x, z: data.z,
-        rotation: data.rotation, team: data.team, slot: data.slot,
-        targetX: data.x, targetZ: data.z, targetRotation: data.rotation
-      });
+      Object.assign(existing, { name: data.name, color: data.color, team: data.team, slot: data.slot });
+      if (snap) {
+        existing.x = data.x; existing.z = data.z; existing.rotation = data.rotation;
+      }
+      existing.targetX = data.x; existing.targetZ = data.z; existing.targetRotation = data.rotation;
       return existing;
     }
     return { ...data, targetX: data.x, targetZ: data.z,
@@ -127,8 +127,9 @@ function updateMeshes() {
     p.mesh.position.set(p.x, 0, p.z);
     p.mesh.rotation.y = p.rotation || 0;
   }
+  const liveMeshes = new Set(S.players.map(p => p.mesh).filter(Boolean));
   for (const child of [...S.scene.children]) {
-    if (child.userData.playerId && !S.players.some(p => p.id === child.userData.playerId)) S.scene.remove(child);
+    if (child.userData.playerId && !liveMeshes.has(child)) S.scene.remove(child);
   }
   syncPlayerUI();
   updatePlayerLabels();
@@ -323,6 +324,10 @@ function updateGame(dt) {
     local.z = local.team === 0
       ? THREE.MathUtils.clamp(local.z + dz * speed * dt, 1.1, 6.05)
       : THREE.MathUtils.clamp(local.z + dz * speed * dt, -6.05, -1.1);
+    if (S.mode === "online" && !S.host && local.targetX !== null) {
+      local.x = THREE.MathUtils.damp(local.x, local.targetX, 5, dt);
+      local.z = THREE.MathUtils.damp(local.z, local.targetZ, 5, dt);
+    }
     if (magnitude > .08) local.rotation = Math.atan2(-dx, -dz);
     local.moving = magnitude;
     if (local.mesh) {
@@ -395,6 +400,16 @@ function simulateBall(dt) {
     if (S.velocity.y < .65) S.velocity.y = 0;
     const side = S.ball.position.z >= 0 ? 0 : 1;
     S.sideBounces[side] += 1;
+    if (S.serveActive) {
+      const inCorrectServiceArea = side === 1 - S.servingTeam
+        && Math.abs(S.ball.position.z) > COURT.kitchen
+        && Math.sign(S.ball.position.x || S.serveTargetX) === Math.sign(S.serveTargetX);
+      S.serveActive = false;
+      if (!inCorrectServiceArea) {
+        awardPoint(1 - S.servingTeam, "Giao bóng lỗi hoặc vào Kitchen");
+        return;
+      }
+    }
     if (S.twoBounceStep < 2 && S.expectedBounceTeam === side) {
       S.twoBounceStep += 1;
       S.expectedBounceTeam = S.twoBounceStep === 1 ? 1 - side : null;
@@ -431,8 +446,8 @@ function startServe() {
   const targetX = -server.x * .55;
   S.ball.position.set(server.x, 1.25, server.z - direction * .15);
   S.velocity.set((targetX - server.x) * .65, 5.4, direction * 10.4);
-  S.phase = "rally"; S.rally = 0; S.twoBounceStep = 0; S.sideBounces = [0, 0];
-  S.expectedBounceTeam = 1 - server.team;
+  S.phase = "rally"; S.rally = 0; S.twoBounceStep = 0; S.serveActive = true; S.sideBounces = [0, 0];
+  S.expectedBounceTeam = 1 - server.team; S.serveActive = true; S.serveTargetX = targetX;
   S.lastHitTeam = server.team; S.cooldown = .25;
   $("#gameStatus").textContent = "SERVE · Giao chéo sân, bóng phải nảy trước khi trả";
   syncScore();
@@ -573,7 +588,7 @@ function broadcastSnapshot() {
       rotation: p.rotation, team: p.team, slot: p.slot })),
     score: S.score, servingTeam: S.servingTeam, serverIndex: S.serverIndex,
     rally: S.rally, phase: S.phase, expectedBounceTeam: S.expectedBounceTeam,
-    twoBounceStep: S.twoBounceStep, sideBounces: S.sideBounces,
+    twoBounceStep: S.twoBounceStep, serveActive: S.serveActive, sideBounces: S.sideBounces,
     ball: S.ball ? { x: S.ball.position.x, y: S.ball.position.y, z: S.ball.position.z,
       vx: S.velocity.x, vy: S.velocity.y, vz: S.velocity.z } : null,
     status: $("#gameStatus").textContent
@@ -614,7 +629,7 @@ function attachConnection(conn, isGuest) {
     } else if (message.type === "serve" && S.host) {
       startServe();
     } else if (message.type === "welcome" && !S.host) {
-      mergePlayers(message.players || S.players);
+      mergePlayers(message.players || S.players, true);
       S.score = message.score || [0, 0];
       S.servingTeam = message.servingTeam || 0;
       S.serverIndex = message.serverIndex || 0;
@@ -628,6 +643,7 @@ function attachConnection(conn, isGuest) {
       S.phase = message.phase || S.phase;
       S.expectedBounceTeam = message.expectedBounceTeam;
       S.twoBounceStep = message.twoBounceStep ?? S.twoBounceStep;
+      S.serveActive = message.serveActive ?? S.serveActive;
       S.sideBounces = message.sideBounces || [0, 0];
       if (message.ball && S.ball) {
         S.ball.position.set(message.ball.x, message.ball.y, message.ball.z);
@@ -665,7 +681,7 @@ function startTraining() {
     { ...createPlayer(3, "bot3", "RIVAL 02", "#ed9b9b"), bot: true }
   ];
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 0; S.rally = 0;
-  S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.sideBounces = [0, 0];
+  S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.serveActive = false; S.sideBounces = [0, 0];
   syncScore(); $("#roomCodeLabel").textContent = "TRAINING";
   $("#networkLabel").textContent = "CHẾ ĐỘ LUYỆN TẬP";
   $("#gameStatus").textContent = "SẴN SÀNG · Nhấn SERVE để bắt đầu";
@@ -713,7 +729,7 @@ function joinRoom() {
   leaveNetwork();
   S.mode = "online"; S.host = false; S.code = code; S.id = "joining";
   S.players = [createPlayer(0, S.id, S.name, S.color)];
-  S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 0; S.phase = "ready"; S.twoBounceStep = 0;
+  S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 0; S.phase = "ready"; S.twoBounceStep = 0; S.serveActive = false;
   $("#roomCodeLabel").textContent = "YOLO-" + code;
   $("#networkLabel").textContent = "ĐANG KẾT NỐI";
   $("#gameStatus").textContent = "Đang kết nối chủ phòng...";
