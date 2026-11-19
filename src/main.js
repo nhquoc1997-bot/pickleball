@@ -69,7 +69,7 @@ function syncScore() {
   $("#serverNameLabel").textContent = final
     ? "WINNER: " + (S.matchWinner === 0 ? "TEAM YOLO" : "OPPONENT")
     : "SERVER " + S.serverNumber + (server ? " · " + server.name : "");
-  const scoreTeams = $(".score-team");
+  const scoreTeams = document.querySelectorAll(".score-team");
   scoreTeams[0]?.classList.toggle("active-team", S.servingTeam === 0);
   scoreTeams[1]?.classList.toggle("active-team", S.servingTeam === 1);
 }
