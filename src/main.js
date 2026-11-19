@@ -31,6 +31,7 @@ import {
   updateCareerRecord
 } from "./stats.mjs";
 import { getRenderProfile, nextRenderQuality } from "./performance-budget.mjs";
+import { advanceFixedSteps, limitPlayerInput } from "./simulation-clock.mjs";
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -60,7 +61,8 @@ const S = {
   lastHostMessageAt: 0, rtt: 0, netBallTarget: null,
   networkSession: 0, connectionLost: false,
   hostPeerId: null, resumeToken: null, reconnectTimer: null, reconnectAttempts: 0,
-  qualityLevel: 1, frameSamples: [], lastQualityCheck: 0, keyLight: null, isMobile: false
+  qualityLevel: 1, frameSamples: [], lastQualityCheck: 0, keyLight: null, isMobile: false,
+  physicsAccumulator: 0
 };
 
 function toast(message) {
@@ -304,7 +306,8 @@ function createPlayer(slot, id, name, color) {
     velocityX: 0, velocityZ: 0, moving: 0, swing: 0, swingType: "drive", swingSide: "forehand",
     splitStep: 0, lunge: 0, lungeSide: 1, lungeStrength: 1, lungeCooldown: 0,
     volleyFollowThrough: 0, bot: false, botThink: 0,
-    connected: true, resumeToken: null, disconnectUntil: 0, statsKey: id };
+    connected: true, resumeToken: null, disconnectUntil: 0, statsKey: id,
+    lastInputX: null, lastInputZ: null, lastInputAt: 0 };
 }
 function mergePlayers(incoming, snap = false) {
   const previous = new Map(S.players.map(p => [p.id, p]));
@@ -628,7 +631,7 @@ function animate() {
   requestAnimationFrame(animate);
   const rawDt = S.clock.getDelta();
   if (document.hidden) return;
-  const dt = Math.min(rawDt, .033);
+  const dt = Math.min(rawDt, .05);
   updateGame(dt);
   updateCamera(dt);
   if (rawDt > .001) {
@@ -746,7 +749,17 @@ function updateGame(dt) {
     const blend = 1 - Math.exp(-22 * dt);
     S.ball.position.lerp(S.netBallTarget, blend);
   }
-  if (S.ball && (S.host || S.mode === "training")) simulateBall(dt);
+  if (S.ball && (S.host || S.mode === "training")) {
+    if (S.phase === "rally") {
+      const fixed = advanceFixedSteps(S.physicsAccumulator, dt, 1 / 120, 8);
+      S.physicsAccumulator = fixed.accumulator;
+      for (let step = 0; step < fixed.steps && S.phase === "rally"; step++) {
+        simulateBall(1 / 120);
+      }
+    } else {
+      S.physicsAccumulator = 0;
+    }
+  }
   if (S.mode === "online" && !S.host && S.networkReady) {
     const now = performance.now();
     if (now - S.lastPingAt > 2000) {
@@ -980,7 +993,7 @@ function startServe(requestedBy = S.id) {
   S.ball.position.set(server.x, 1.25, server.z + direction * .22);
   S.velocity.set((targetX - server.x) * .65, 5.4, direction * 8.0);
   S.spin?.set(direction * 2.4, server.x > 0 ? -1.2 : 1.2, 0);
-  S.phase = "rally"; S.rally = 0; S.twoBounceStep = 0; S.sideBounces = [0, 0];
+  S.phase = "rally"; S.physicsAccumulator = 0; S.rally = 0; S.twoBounceStep = 0; S.sideBounces = [0, 0];
   S.ballBouncedSinceHit = false; S.serveNetContact = false;
   S.expectedBounceTeam = 1 - server.team; S.serveActive = true; S.serveTargetX = targetX;
   S.lastHitTeam = server.team; S.lastHitPlayerId = server.id;
@@ -1086,6 +1099,7 @@ function switchTeamSides(team) {
 function awardPoint(winner, reason, responsiblePlayerId = null) {
   if (S.phase !== "rally") return;
   S.phase = "point";
+  S.physicsAccumulator = 0;
   S.velocity.set(0, 0, 0);
   S.spin?.set(0, 0, 0);
   const transition = nextServeState({
@@ -1303,6 +1317,7 @@ function attachConnection(conn, isGuest) {
         player.connected = true;
         player.disconnectUntil = 0;
         player.lastInputSeq = 0;
+        player.lastInputX = player.x; player.lastInputZ = player.z; player.lastInputAt = 0;
       } else {
         const slot = findAvailableSlot(S.players, Date.now(), 4);
         if (slot < 0) {
@@ -1313,6 +1328,7 @@ function attachConnection(conn, isGuest) {
         player = createPlayer(slot, conn.peer, "PLAYER", slot < 2 ? "#70c5e8" : "#ed9b9b");
         player.resumeToken = token || makeResumeToken();
         player.statsKey = player.resumeToken;
+        player.lastInputX = player.x; player.lastInputZ = player.z; player.lastInputAt = 0;
         S.players.push(player);
       }
       joined = true;
@@ -1329,12 +1345,25 @@ function attachConnection(conn, isGuest) {
       const player = S.players.find(p => p.id === conn.peer);
       if (player && Number.isFinite(message.x) && Number.isFinite(message.z)) {
         const seq = Number.isSafeInteger(message.seq) ? message.seq : (player.lastInputSeq || 0) + 1;
-        if (seq > (player.lastInputSeq || 0)) {
+        const now = performance.now();
+        if (seq > (player.lastInputSeq || 0) && now - (player.lastInputAt || 0) >= 15) {
+          const elapsed = player.lastInputAt
+            ? Math.min(.25, Math.max(.02, (now - player.lastInputAt) / 1000))
+            : .1;
+          const safeTarget = limitPlayerInput({
+            currentX: Number.isFinite(player.lastInputX) ? player.lastInputX : player.x,
+            currentZ: Number.isFinite(player.lastInputZ) ? player.lastInputZ : player.z,
+            targetX: message.x,
+            targetZ: message.z,
+            elapsedSeconds: elapsed,
+            team: player.team
+          });
           player.lastInputSeq = seq;
-          player.targetX = THREE.MathUtils.clamp(message.x, -2.55, 2.55);
-          player.targetZ = player.team === 0
-            ? THREE.MathUtils.clamp(message.z, 1.1, 7.15)
-            : THREE.MathUtils.clamp(message.z, -7.15, -1.1);
+          player.lastInputAt = now;
+          player.lastInputX = safeTarget.x;
+          player.lastInputZ = safeTarget.z;
+          player.targetX = safeTarget.x;
+          player.targetZ = safeTarget.z;
           player.targetRotation = Number.isFinite(message.rotation)
             ? THREE.MathUtils.clamp(message.rotation, -Math.PI, Math.PI)
             : (player.targetRotation || 0);
