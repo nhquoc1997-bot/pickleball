@@ -193,14 +193,24 @@ export function createRiggedAvatar(template, player) {
     spine: model.getObjectByName("mixamorigSpine"),
     spine1: model.getObjectByName("mixamorigSpine1"),
     spine2: model.getObjectByName("mixamorigSpine2"),
+    neck: model.getObjectByName("mixamorigNeck"),
     head: model.getObjectByName("mixamorigHead"),
-    rightArm: model.getObjectByName("mixamorigRightArm"),
-    rightForeArm: model.getObjectByName("mixamorigRightForeArm"),
-    rightHand: model.getObjectByName("mixamorigRightHand"),
+    leftShoulder: model.getObjectByName("mixamorigLeftShoulder"),
+    rightShoulder: model.getObjectByName("mixamorigRightShoulder"),
     leftArm: model.getObjectByName("mixamorigLeftArm"),
+    rightArm: model.getObjectByName("mixamorigRightArm"),
     leftForeArm: model.getObjectByName("mixamorigLeftForeArm"),
+    rightForeArm: model.getObjectByName("mixamorigRightForeArm"),
+    leftHand: model.getObjectByName("mixamorigLeftHand"),
+    rightHand: model.getObjectByName("mixamorigRightHand"),
     leftUpLeg: model.getObjectByName("mixamorigLeftUpLeg"),
-    rightUpLeg: model.getObjectByName("mixamorigRightUpLeg")
+    rightUpLeg: model.getObjectByName("mixamorigRightUpLeg"),
+    leftLeg: model.getObjectByName("mixamorigLeftLeg"),
+    rightLeg: model.getObjectByName("mixamorigRightLeg"),
+    leftFoot: model.getObjectByName("mixamorigLeftFoot"),
+    rightFoot: model.getObjectByName("mixamorigRightFoot"),
+    leftToeBase: model.getObjectByName("mixamorigLeftToeBase"),
+    rightToeBase: model.getObjectByName("mixamorigRightToeBase")
   };
 
   const morphMeshes = [];
@@ -233,18 +243,33 @@ export function createRiggedAvatar(template, player) {
   return root;
 }
 
+function clamp01(value) {
+  return THREE.MathUtils.clamp(value, 0, 1);
+}
+
+function smooth01(value, start, end) {
+  const t = clamp01((value - start) / Math.max(.0001, end - start));
+  return t * t * (3 - 2 * t);
+}
+
 function playLocomotion(q, moving) {
-  const wanted = moving > .12 ? "walk" : "idle";
-  if (wanted === q.activeMove) return;
-  const next = q.actions[wanted] || q.actions.idle;
-  const previous = q.actions[q.activeMove];
-  if (next) {
-    next.reset();
-    next.setEffectiveTimeScale(wanted === "walk" ? 1.18 : 1);
-    next.fadeIn(.2).play();
+  const wanted = moving > .1 ? "walk" : "idle";
+  if (wanted !== q.activeMove) {
+    const next = q.actions[wanted] || q.actions.idle;
+    const previous = q.actions[q.activeMove];
+    if (next) {
+      next.reset();
+      next.setEffectiveTimeScale(wanted === "walk"
+        ? THREE.MathUtils.clamp(.78 + moving * .95, .8, 1.85)
+        : 1);
+      next.fadeIn(.24).play();
+    }
+    if (previous && previous !== next) previous.fadeOut(.24);
+    q.activeMove = wanted;
   }
-  if (previous && previous !== next) previous.fadeOut(.2);
-  q.activeMove = wanted;
+  if (q.activeMove === "walk" && q.actions.walk) {
+    q.actions.walk.setEffectiveTimeScale(THREE.MathUtils.clamp(.78 + moving * .95, .8, 1.85));
+  }
 }
 
 function boneOverlay(q, bone, x, y, z) {
@@ -275,57 +300,165 @@ function updateBlink(q, time) {
   }
 }
 
-export function animateRiggedAvatar(root, player, dt, time) {
-  if (!root?.userData?.rigged) return;
-  const q = root.userData;
-
-  // Remove the previous procedural overlay before the animation mixer evaluates this frame.
-  for (const [bone, offset] of q.lastOverlay) bone.quaternion.multiply(offset.clone().invert());
-  q.lastOverlay.clear();
-
-  const moving = player.moving || 0;
-  playLocomotion(q, moving);
-  q.mixer.update(dt);
-
-  // A little athletic body lean and natural vertical motion while accelerating.
-  q.model.position.y = q.baseY + (moving > .08
-    ? Math.abs(Math.sin(time * 10.5 + q.idlePhase)) * .022 * moving
-    : Math.sin(time * 1.8 + q.idlePhase) * .0025);
-  if (moving > .08) boneOverlay(q, q.bones.spine1, .055 * moving, 0, 0);
-
-  // Sport-specific paddle strokes layered over the mocap idle/walk pose.
-  if (player.swing > 0) {
-    player.swing = Math.max(0, player.swing - dt * 2.8);
-    const progress = 1 - player.swing;
-    const pulse = Math.sin(progress * Math.PI);
-    const follow = progress > .5 ? (progress - .5) * 2 : progress * 2;
-    const type = player.swingType || "drive";
-    let shoulderX = -.78, shoulderZ = .38, elbowX = -.65, wristZ = -.16, torsoY = -.18;
-    if (type === "dink") {
-      shoulderX = -.48; shoulderZ = .18; elbowX = -.38; wristZ = -.1; torsoY = -.08;
-    } else if (type === "slice") {
-      shoulderX = -.58; shoulderZ = -.95; elbowX = -.45; wristZ = -.72; torsoY = -.42;
-    } else if (type === "lob") {
-      shoulderX = -1.45; shoulderZ = .2; elbowX = -.38; wristZ = .1; torsoY = .12;
-    } else if (type === "volley") {
-      shoulderX = -.88; shoulderZ = .28; elbowX = -.78; wristZ = -.12; torsoY = -.12;
-    } else if (type === "smash") {
-      shoulderX = -1.72; shoulderZ = .18; elbowX = -.42; wristZ = .16; torsoY = .1;
-    }
-    boneOverlay(q, q.bones.rightArm, shoulderX * pulse, 0, shoulderZ * pulse);
-    boneOverlay(q, q.bones.rightForeArm, elbowX * pulse, 0, 0);
-    boneOverlay(q, q.bones.rightHand, 0, 0, wristZ * pulse);
-    boneOverlay(q, q.bones.spine1, 0, torsoY * pulse, .12 * pulse);
-    if (q.paddle) q.paddle.rotation.z = -.18 + .34 * follow * pulse;
-  } else if (q.paddle) {
-    q.paddle.rotation.z *= Math.max(0, 1 - dt * 10);
-  }
-
-  // A small head response and real eyelid morphs keep the athlete from looking frozen.
-  if (q.bones.head) {
+function lookAtBall(q, ballPosition, time) {
+  if (!q.bones.head) return;
+  if (!ballPosition) {
     boneOverlay(q, q.bones.head,
       Math.sin(time * 1.15 + q.idlePhase) * .012,
       Math.sin(time * .72 + q.idlePhase) * .018, 0);
+    return;
   }
+
+  q.model.updateWorldMatrix(true, false);
+  const origin = q.model.getWorldPosition(new THREE.Vector3());
+  const worldDirection = ballPosition.clone().sub(origin).normalize();
+  const modelRotation = q.model.getWorldQuaternion(new THREE.Quaternion()).invert();
+  const localDirection = worldDirection.applyQuaternion(modelRotation);
+  const yaw = THREE.MathUtils.clamp(Math.atan2(localDirection.x, localDirection.z), -.48, .48);
+  const pitch = THREE.MathUtils.clamp(
+    -Math.atan2(localDirection.y, Math.hypot(localDirection.x, localDirection.z)), -.3, .28
+  );
+  boneOverlay(q, q.bones.head, pitch, yaw, 0);
+}
+
+export function animateRiggedAvatar(root, player, dt, time, ballPosition = null) {
+  if (!root?.userData?.rigged) return;
+  const q = root.userData;
+
+  // Remove the previous frame's local-space pose layer before evaluating the mocap clip.
+  for (const [bone, offset] of q.lastOverlay) bone.quaternion.multiply(offset.clone().invert());
+  q.lastOverlay.clear();
+
+  const moving = clamp01(player.moving || 0);
+  const vx = player.velocityX || 0;
+  const vz = player.velocityZ || 0;
+  const speed = Math.hypot(vx, vz);
+  playLocomotion(q, moving);
+  q.mixer.update(dt);
+
+  const ready = 1 - smooth01(moving, .04, .42);
+  const forwardSpeed = -Math.sin(root.rotation.y) * vx - Math.cos(root.rotation.y) * vz;
+  const lateralSpeed = Math.cos(root.rotation.y) * vx + Math.sin(root.rotation.y) * vz;
+
+  // Pickleball ready position: low centre of gravity, flexed knees and paddle held in front.
+  boneOverlay(q, q.bones.hips, .035 * ready, 0, -.035 * lateralSpeed * .035);
+  boneOverlay(q, q.bones.spine1, .075 * ready - .035 * forwardSpeed, 0, -.055 * lateralSpeed);
+  boneOverlay(q, q.bones.leftUpLeg, .14 * ready, 0, -.035 * ready);
+  boneOverlay(q, q.bones.rightUpLeg, .14 * ready, 0, .035 * ready);
+  boneOverlay(q, q.bones.leftLeg, -.24 * ready, 0, 0);
+  boneOverlay(q, q.bones.rightLeg, -.24 * ready, 0, 0);
+  boneOverlay(q, q.bones.leftFoot, .09 * ready, 0, 0);
+  boneOverlay(q, q.bones.rightFoot, .09 * ready, 0, 0);
+  boneOverlay(q, q.bones.leftArm, -.18 * ready, 0, -.12 * ready);
+  boneOverlay(q, q.bones.leftForeArm, -.24 * ready, 0, -.05 * ready);
+  boneOverlay(q, q.bones.rightArm, -.22 * ready, 0, .13 * ready);
+  boneOverlay(q, q.bones.rightForeArm, -.3 * ready, 0, .02 * ready);
+
+  // Natural acceleration, side-to-side weight transfer and running bounce.
+  const lateralLean = THREE.MathUtils.clamp(lateralSpeed / 4.5, -1, 1);
+  boneOverlay(q, q.bones.hips, 0, 0, -lateralLean * .075 * moving);
+  boneOverlay(q, q.bones.spine1, -.045 * moving, 0, lateralLean * .095 * moving);
+  if (moving > .08) {
+    boneOverlay(q, q.bones.leftArm, .08 * Math.sin(time * 10 + q.idlePhase) * moving, 0, 0);
+    boneOverlay(q, q.bones.leftForeArm, -.08 * Math.sin(time * 10 + q.idlePhase) * moving, 0, 0);
+  }
+
+  // Split step when the incoming ball crosses the net: a small hop, then land in a ready stance.
+  let splitLift = 0;
+  if ((player.splitStep || 0) > 0) {
+    player.splitStep = Math.max(0, player.splitStep - dt);
+    const progress = 1 - player.splitStep / .34;
+    const pulse = Math.sin(clamp01(progress) * Math.PI);
+    splitLift = .052 * pulse;
+    boneOverlay(q, q.bones.hips, -.08 * pulse, 0, 0);
+    boneOverlay(q, q.bones.leftUpLeg, -.08 * pulse, 0, -.055 * pulse);
+    boneOverlay(q, q.bones.rightUpLeg, -.08 * pulse, 0, .055 * pulse);
+    boneOverlay(q, q.bones.leftLeg, -.18 * pulse, 0, 0);
+    boneOverlay(q, q.bones.rightLeg, -.18 * pulse, 0, 0);
+    boneOverlay(q, q.bones.leftArm, -.12 * pulse, 0, -.08 * pulse);
+    boneOverlay(q, q.bones.rightArm, -.12 * pulse, 0, .08 * pulse);
+  }
+
+  // Explosive reach and recovery when the player has to take a ball outside their stance.
+  let lungeLift = 0;
+  if ((player.lunge || 0) > 0) {
+    player.lunge = Math.max(0, player.lunge - dt * 1.8);
+    const progress = 1 - player.lunge;
+    const intensity = Math.sin(clamp01(progress) * Math.PI) * (player.lungeStrength || 1);
+    const side = player.lungeSide || 1;
+    lungeLift = .018 * intensity;
+    boneOverlay(q, q.bones.hips, -.18 * intensity, 0, -side * .2 * intensity);
+    boneOverlay(q, q.bones.spine1, .18 * intensity, -.04 * side * intensity, side * .28 * intensity);
+    boneOverlay(q, side > 0 ? q.bones.rightUpLeg : q.bones.leftUpLeg, -.58 * intensity, 0, side * .25 * intensity);
+    boneOverlay(q, side > 0 ? q.bones.rightLeg : q.bones.leftLeg, .78 * intensity, 0, 0);
+    boneOverlay(q, side > 0 ? q.bones.leftUpLeg : q.bones.rightUpLeg, .12 * intensity, 0, -side * .08 * intensity);
+    boneOverlay(q, q.bones.rightArm, -.34 * intensity, 0, .16 * intensity);
+    boneOverlay(q, q.bones.rightForeArm, -.24 * intensity, 0, 0);
+  }
+
+  q.model.position.y = q.baseY
+    + (moving > .08 ? Math.abs(Math.sin(time * (8.5 + speed) + q.idlePhase)) * .018 * moving : Math.sin(time * 1.8 + q.idlePhase) * .0025)
+    + splitLift + lungeLift;
+
+  // Each stroke has a backswing, acceleration through contact and a controlled follow-through.
+  if ((player.swing || 0) > 0) {
+    player.swing = Math.max(0, player.swing - dt * 1.72);
+    const progress = 1 - player.swing;
+    const windup = Math.sin(clamp01(progress / .36) * Math.PI * .5);
+    const strike = Math.sin(clamp01((progress - .25) / .48) * Math.PI);
+    const follow = smooth01(progress, .48, .94);
+    const type = player.swingType || "drive";
+    let backX = -.52, hitX = .92, finishX = .18;
+    let backZ = .2, hitZ = .38, finishZ = -.18;
+    let elbowBack = -.16, elbowHit = -.82, elbowFinish = -.2;
+    let wristHit = .16, torsoTurn = -.2, weightShift = .2;
+
+    if (type === "dink") {
+      backX = -.22; hitX = .48; finishX = .12;
+      backZ = .08; hitZ = .12; finishZ = -.04;
+      elbowBack = -.12; elbowHit = -.38; elbowFinish = -.1;
+      wristHit = .12; torsoTurn = -.08; weightShift = .12;
+    } else if (type === "slice") {
+      backX = -.4; hitX = .55; finishX = .08;
+      backZ = -.7; hitZ = -.85; finishZ = -.32;
+      elbowBack = -.2; elbowHit = -.58; elbowFinish = -.14;
+      wristHit = -.52; torsoTurn = -.38; weightShift = .18;
+    } else if (type === "lob") {
+      backX = -1.05; hitX = 1.15; finishX = .42;
+      backZ = .12; hitZ = .22; finishZ = -.08;
+      elbowBack = -.34; elbowHit = -.72; elbowFinish = -.18;
+      wristHit = .22; torsoTurn = .14; weightShift = .1;
+    } else if (type === "volley") {
+      backX = -.28; hitX = .78; finishX = .08;
+      backZ = .18; hitZ = .34; finishZ = -.14;
+      elbowBack = -.12; elbowHit = -.72; elbowFinish = -.16;
+      wristHit = .18; torsoTurn = -.12; weightShift = .08;
+    } else if (type === "smash") {
+      backX = -1.28; hitX = 1.32; finishX = .5;
+      backZ = .1; hitZ = .18; finishZ = -.12;
+      elbowBack = -.48; elbowHit = -.82; elbowFinish = -.2;
+      wristHit = .28; torsoTurn = .18; weightShift = .24;
+    }
+
+    const armX = backX * (1 - windup) + hitX * strike + finishX * follow;
+    const armZ = backZ * (1 - windup) + hitZ * strike + finishZ * follow;
+    const elbowX = elbowBack * (1 - windup) + elbowHit * strike + elbowFinish * follow;
+    boneOverlay(q, q.bones.rightArm, armX, 0, armZ);
+    boneOverlay(q, q.bones.rightForeArm, elbowX, 0, wristHit * strike);
+    boneOverlay(q, q.bones.rightHand, 0, 0, wristHit * .42 * strike);
+    boneOverlay(q, q.bones.spine1, 0, torsoTurn * strike, .12 * strike);
+    boneOverlay(q, q.bones.hips, 0, -torsoTurn * .45 * strike, -weightShift * strike);
+    boneOverlay(q, q.bones.leftUpLeg, .12 * strike, 0, 0);
+    boneOverlay(q, q.bones.rightUpLeg, -.12 * strike, 0, 0);
+    if (q.paddle) {
+      q.paddle.rotation.z = -.18 + .28 * strike - .1 * follow;
+      q.paddle.rotation.x = .08 + .18 * strike;
+    }
+  } else if (q.paddle) {
+    q.paddle.rotation.z = THREE.MathUtils.damp(q.paddle.rotation.z, -.18, 12, dt);
+    q.paddle.rotation.x = THREE.MathUtils.damp(q.paddle.rotation.x, .08, 12, dt);
+  }
+
+  lookAtBall(q, ballPosition, time);
   updateBlink(q, time);
 }
