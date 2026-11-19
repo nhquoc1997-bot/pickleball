@@ -4,6 +4,7 @@ on:
     branches:
       - main
       - feat/yolo-gameplay-v2
+      - feat/yolo-rigged-athletes-v3
   pull_request:
     branches:
       - main
@@ -18,11 +19,17 @@ jobs:
         with:
           node-version: 20
       - name: Validate JavaScript module syntax
-        run: node --input-type=module --check < src/main.js
-      - name: Verify app entry points
+        run: |
+          node --input-type=module --check < src/main.js
+          node --input-type=module --check < src/avatar-rig.js
+      - name: Verify app entry points and import map
         run: |
           test -s index.html
           test -s styles.css
           test -s src/main.js
+          test -s src/avatar-rig.js
+          test -s THIRD_PARTY_NOTICES.md
           grep -q 'src/main.js' index.html
+          grep -q 'avatar-rig.js' src/main.js
+          grep -q 'type="importmap"' index.html
           grep -q 'styles.css' index.html
