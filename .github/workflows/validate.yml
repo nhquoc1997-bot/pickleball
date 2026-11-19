@@ -7,6 +7,7 @@ on:
       - feat/yolo-rigged-athletes-v3
       - feat/yolo-pickleball-motion-v4
       - feat/yolo-pickleball-gameplay-v5
+      - feat/yolo-pickleball-network-v6
   pull_request:
     branches:
       - main
@@ -35,3 +36,7 @@ jobs:
           grep -q 'avatar-rig.js' src/main.js
           grep -q 'type="importmap"' index.html
           grep -q 'styles.css' index.html
+          grep -q 'function serializePlayers' src/main.js
+          grep -q 'seq: ++S.snapshotSeq' src/main.js
+          grep -q 'message.type === "ping"' src/main.js
+          grep -q 'message.type === "pong"' src/main.js
