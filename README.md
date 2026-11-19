@@ -13,6 +13,7 @@ Serve the repository root with any static web server (for example VS Code Live S
 - Motion-captured idle/walk clips blended with a pickleball ready stance, split-step on incoming net crossings, lateral lunge/recovery, ball tracking with head/eyes, and staged Dink, Slice, Lob, Volley, Drive and Smash stroke animations.
 - Predictive bot interception and smoother acceleration/deceleration; online snapshots synchronize swing, split-step and lunge cues so all four players see the same actions.
 - V8 tactical doubles AI: bots assign a single chaser and a partner-cover role, advance together to a Kitchen-ready formation when play moves to the opposite court, and choose Dink, Slice, Lob, Drive or Smash based on contact height and opponent spacing.
+- V9 athlete motion: local-axis footwork profiles drive more expressive lateral shuffle, crossover steps, forward/retreat posture and braking; strokes now blend wind-up/contact/follow-through and distinguish forehand from backhand cues. The camera follows the player's side of the court and reframes for mobile.
 - Smooth acceleration/deceleration for player movement, keyboard controls and a larger mobile analog joystick with deadzone filtering, safe-area spacing and thumb-friendly shot buttons.
 - Local player profile remembers the jersey name and shirt colour on the same device.
 - Training mode with four local/demo players and basic bot movement/returns.
