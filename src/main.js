@@ -16,6 +16,13 @@ import {
   chooseBotShot,
   shouldBotContestBall
 } from "./ai-strategy.mjs";
+import {
+  RECONNECT_GRACE_MS,
+  findResumablePlayer,
+  findAvailableSlot,
+  expireDisconnectedPlayers,
+  roomPresence
+} from "./room-state.mjs";
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -41,7 +48,8 @@ const S = {
   lastNet: 0, lastSnapshot: 0, pointTimer: null, disposed: false,
   inputSeq: 0, lastSnapshotSeq: 0, snapshotSeq: 0, lastPingAt: 0,
   lastHostMessageAt: 0, rtt: 0, netBallTarget: null,
-  networkSession: 0, connectionLost: false
+  networkSession: 0, connectionLost: false,
+  hostPeerId: null, resumeToken: null, reconnectTimer: null, reconnectAttempts: 0
 };
 
 function toast(message) {
@@ -94,6 +102,72 @@ function saveProfile() {
   try { localStorage.setItem("yolo-pickleball-profile", JSON.stringify({ name: S.name, color: S.color })); }
   catch {}
 }
+function makeResumeToken() {
+  const bytes = new Uint8Array(16);
+  if (window.crypto?.getRandomValues) window.crypto.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return [...bytes].map(value => value.toString(16).padStart(2, "0")).join("");
+}
+function saveRoomResume() {
+  if (!S.code || !S.resumeToken) return;
+  try {
+    localStorage.setItem("yolo-pickleball-room-resume", JSON.stringify({
+      code: S.code, hostPeerId: S.hostPeerId, token: S.resumeToken
+    }));
+  } catch {}
+}
+function loadRoomResume(code) {
+  try {
+    const saved = JSON.parse(localStorage.getItem("yolo-pickleball-room-resume") || "null");
+    return saved?.code === code && typeof saved.token === "string" ? saved : null;
+  } catch { return null; }
+}
+function clearRoomResume() {
+  try { localStorage.removeItem("yolo-pickleball-room-resume"); } catch {}
+}
+function scheduleReconnect() {
+  if (S.host || S.mode !== "online" || !S.peer || !S.hostPeerId || S.networkReady) return;
+  if (S.reconnectAttempts >= 5) {
+    $("#reconnectButton").hidden = false;
+    $("#networkLabel").textContent = "CẦN KẾT NỐI LẠI";
+    $("#gameStatus").textContent = "Chưa thể kết nối lại. Nhấn KẾT NỐI LẠI để thử tiếp.";
+    return;
+  }
+  const delays = [900, 1600, 2800, 4500, 7000];
+  const delay = delays[S.reconnectAttempts++];
+  clearTimeout(S.reconnectTimer);
+  S.reconnectTimer = setTimeout(() => {
+    if (S.networkReady || !S.connectionLost || !S.peer || !S.hostPeerId) return;
+    try {
+      const conn = S.peer.connect(S.hostPeerId, { reliable: true });
+      attachConnection(conn, true);
+    } catch (error) {
+      console.warn("Automatic reconnect attempt failed", error);
+      scheduleReconnect();
+    }
+  }, delay);
+}
+function reconnectRoom() {
+  if (S.mode !== "online" || S.host) return;
+  if (!S.peer || !S.hostPeerId) {
+    toast("Hãy quay về sảnh và tham gia lại bằng mã phòng cũ.");
+    return;
+  }
+  clearTimeout(S.reconnectTimer);
+  S.reconnectTimer = null;
+  S.reconnectAttempts = 0;
+  S.connectionLost = true;
+  $("#reconnectButton").hidden = true;
+  $("#networkLabel").textContent = "ĐANG KẾT NỐI LẠI";
+  $("#gameStatus").textContent = "Đang khôi phục vị trí và trạng thái trận đấu...";
+  try {
+    const conn = S.peer.connect(S.hostPeerId, { reliable: true });
+    attachConnection(conn, true);
+  } catch (error) {
+    console.warn("Manual reconnect attempt failed", error);
+    scheduleReconnect();
+  }
+}
 function setName(value) {
   S.name = cleanName(value);
   saveProfile();
@@ -112,17 +186,24 @@ function setName(value) {
 function syncPlayerUI() {
   const list = $("#playerList");
   list.innerHTML = "";
+  const ordered = [...S.players].sort((a, b) => a.slot - b.slot);
+  const presence = roomPresence(ordered);
   for (let i = 0; i < 4; i++) {
-    const p = S.players[i];
+    const p = ordered[i];
     const row = document.createElement("div");
-    row.className = "player-row" + (p ? "" : " waiting");
+    row.className = "player-row" + (!p ? " waiting" : p.connected === false ? " offline" : "");
     const dot = document.createElement("span"); dot.className = "player-dot";
     const name = document.createElement("b"); name.textContent = p ? p.name : "Đang chờ người chơi";
     const role = document.createElement("small");
-    role.textContent = p ? (p.id === S.id ? "YOU" : (p.team === 0 ? "TEAM A" : "TEAM B")) : String(i + 1).padStart(2, "0");
+    role.textContent = !p ? String(i + 1).padStart(2, "0")
+      : p.connected === false ? "OFFLINE"
+      : p.id === S.id ? "YOU" : (p.team === 0 ? "TEAM A" : "TEAM B");
     row.append(dot, name, role); list.append(row);
   }
-  $("#playerCount").textContent = String(S.players.length).padStart(2, "0") + " / 04";
+  $("#playerCount").textContent = String(presence.connected).padStart(2, "0") + " / 04";
+  $("#playerCount").title = presence.reconnecting
+    ? presence.reconnecting + " người đang trong thời gian kết nối lại"
+    : "Người chơi đang kết nối";
 }
 function positionForSlot(slot) {
   // Seat order alternates teams so a room is balanced as players join:
@@ -137,7 +218,8 @@ function createPlayer(slot, id, name, color) {
     targetX: null, targetZ: null, targetRotation: null, mesh: null, rigged: false,
     velocityX: 0, velocityZ: 0, moving: 0, swing: 0, swingType: "drive", swingSide: "forehand",
     splitStep: 0, lunge: 0, lungeSide: 1, lungeStrength: 1, lungeCooldown: 0,
-    volleyFollowThrough: 0, bot: false, botThink: 0 };
+    volleyFollowThrough: 0, bot: false, botThink: 0,
+    connected: true, resumeToken: null, disconnectUntil: 0 };
 }
 function mergePlayers(incoming, snap = false) {
   const previous = new Map(S.players.map(p => [p.id, p]));
@@ -146,6 +228,7 @@ function mergePlayers(incoming, snap = false) {
     if (existing) {
       Object.assign(existing, {
         name: data.name, color: data.color, team: data.team, slot: data.slot,
+        connected: data.connected !== false,
         swing: data.swing ?? existing.swing ?? 0,
         swingType: data.swingType ?? existing.swingType ?? "drive",
         swingSide: data.swingSide ?? existing.swingSide ?? "forehand",
@@ -168,7 +251,8 @@ function mergePlayers(incoming, snap = false) {
       splitStep: data.splitStep || 0,
       lunge: data.lunge || 0, lungeSide: data.lungeSide || 1,
       lungeStrength: data.lungeStrength || 1, lungeCooldown: 0,
-      volleyFollowThrough: data.volleyFollowThrough || 0 };
+      volleyFollowThrough: data.volleyFollowThrough || 0,
+      connected: data.connected !== false, resumeToken: null, disconnectUntil: 0 };
   });
 }
 function updatePlayerLabels() {
@@ -959,14 +1043,17 @@ function serializePlayers() {
     swingSide: p.swingSide || "forehand",
     splitStep: p.splitStep || 0, lunge: p.lunge || 0,
     lungeSide: p.lungeSide || 1, lungeStrength: p.lungeStrength || 1,
-    volleyFollowThrough: p.volleyFollowThrough || 0
+    volleyFollowThrough: p.volleyFollowThrough || 0,
+    connected: p.connected !== false
   }));
 }
 function sendWelcome(conn) {
+  const player = S.players.find(p => p.id === conn.peer);
   conn.send({
     type: "welcome", players: serializePlayers(), score: [...S.score],
     servingTeam: S.servingTeam, serverIndex: S.serverIndex,
-    serverNumber: S.serverNumber, matchWinner: S.matchWinner, hostId: S.id
+    serverNumber: S.serverNumber, matchWinner: S.matchWinner,
+    hostId: S.id, resumeToken: player?.resumeToken || null
   });
 }
 function broadcastSnapshot() {
@@ -1009,27 +1096,52 @@ function attachConnection(conn, isGuest) {
         toast("Kết nối phòng quá thời gian.");
         conn.close();
       }, 15000);
-      conn.send({ type: "join", name: S.name, color: S.color });
+      conn.send({ type: "join", name: S.name, color: S.color, resumeToken: S.resumeToken });
     } else {
       handshakeTimer = setTimeout(() => {
         if (session === S.networkSession && !joined && conn.open) conn.close();
       }, 12000);
-      sendWelcome(conn);
-      broadcastSnapshot();
     }
   });
   conn.on("data", message => {
     if (session !== S.networkSession || !message || !message.type) return;
     if (isGuest) S.lastHostMessageAt = performance.now();
     if (message.type === "join" && S.host) {
-      const player = S.players.find(p => p.id === conn.peer);
-      if (player) {
-        joined = true;
-        clearTimeout(handshakeTimer);
-        player.name = cleanName(message.name);
-        player.color = typeof message.color === "string" && /^#[0-9a-f]{6}$/i.test(message.color)
-          ? message.color : "#70c5e8";
+      const token = typeof message.resumeToken === "string" && /^[a-f0-9]{32}$/i.test(message.resumeToken)
+        ? message.resumeToken : "";
+      const duplicate = token
+        ? S.players.find(p => p.resumeToken === token && p.connected !== false)
+        : null;
+      if (duplicate) {
+        conn.send({ type: "full", reason: "Tài khoản này đã có kết nối trong phòng." });
+        conn.close();
+        return;
       }
+      S.players = expireDisconnectedPlayers(S.players, Date.now());
+      let player = findResumablePlayer(S.players, token, Date.now());
+      if (player) {
+        player.id = conn.peer;
+        player.connected = true;
+        player.disconnectUntil = 0;
+        player.lastInputSeq = 0;
+      } else {
+        const slot = findAvailableSlot(S.players, Date.now(), 4);
+        if (slot < 0) {
+          conn.send({ type: "full", reason: "Phòng đang đủ người hoặc còn chỗ được giữ để kết nối lại." });
+          conn.close();
+          return;
+        }
+        player = createPlayer(slot, conn.peer, "PLAYER", slot < 2 ? "#70c5e8" : "#ed9b9b");
+        player.resumeToken = token || makeResumeToken();
+        S.players.push(player);
+      }
+      joined = true;
+      clearTimeout(handshakeTimer);
+      player.name = cleanName(message.name);
+      player.color = typeof message.color === "string" && /^#[0-9a-f]{6}$/i.test(message.color)
+        ? message.color : player.color || "#70c5e8";
+      player.connected = true;
+      player.disconnectUntil = 0;
       sendWelcome(conn);
       updateMeshes(); syncScore(); broadcastSnapshot();
     } else if (message.type === "input" && S.host) {
@@ -1069,6 +1181,12 @@ function attachConnection(conn, isGuest) {
       S.connectionLost = false;
       S.lastHostMessageAt = performance.now();
       S.lastPingAt = 0;
+      S.reconnectAttempts = 0;
+      clearTimeout(S.reconnectTimer); S.reconnectTimer = null;
+      S.hostPeerId = message.hostId || "yolo-pb-" + S.code;
+      S.resumeToken = typeof message.resumeToken === "string" ? message.resumeToken : S.resumeToken;
+      saveRoomResume();
+      $("#reconnectButton").hidden = true;
       mergePlayers(message.players || S.players, true);
       S.score = message.score || [0, 0];
       S.servingTeam = message.servingTeam ?? 0;
@@ -1084,6 +1202,9 @@ function attachConnection(conn, isGuest) {
       S.networkReady = true;
       S.connectionLost = false;
       S.lastHostMessageAt = performance.now();
+      S.reconnectAttempts = 0;
+      clearTimeout(S.reconnectTimer); S.reconnectTimer = null;
+      $("#reconnectButton").hidden = true;
       mergePlayers(message.players || S.players);
       S.score = message.score || S.score;
       S.servingTeam = message.servingTeam ?? S.servingTeam;
@@ -1106,38 +1227,62 @@ function attachConnection(conn, isGuest) {
     } else if (message.type === "full") {
       S.networkReady = false;
       S.connectionLost = true;
-      $("#gameStatus").textContent = "PHÒNG ĐÃ ĐỦ 4 NGƯỜI";
-      toast("Phòng đã đủ 4 người."); conn.close();
+      $("#reconnectButton").hidden = true;
+      $("#gameStatus").textContent = message.reason || "PHÒNG ĐÃ ĐỦ 4 NGƯỜI";
+      toast(message.reason || "Phòng đã đủ 4 người."); conn.close();
     }
   });
   conn.on("close", () => {
     if (session !== S.networkSession) return;
     clearTimeout(handshakeTimer);
-    S.conns.delete(conn.peer);
+    const isCurrentConnection = S.conns.get(conn.peer) === conn;
+    if (isCurrentConnection) S.conns.delete(conn.peer);
+    if (!isCurrentConnection) return;
     if (S.host) {
-      S.players = S.players.filter(p => p.id !== conn.peer);
+      const player = S.players.find(p => p.id === conn.peer);
+      if (player && player.slot !== 0 && joined) {
+        player.connected = false;
+        player.disconnectUntil = Date.now() + RECONNECT_GRACE_MS;
+        player.velocityX = 0; player.velocityZ = 0; player.moving = 0;
+        const token = player.resumeToken;
+        const disconnectedId = player.id;
+        setTimeout(() => {
+          if (session !== S.networkSession) return;
+          const current = S.players.find(p => p.resumeToken === token && p.id === disconnectedId);
+          if (current && current.connected === false && current.disconnectUntil <= Date.now()) {
+            S.players = S.players.filter(item => item !== current);
+            updateMeshes(); broadcastSnapshot();
+          }
+        }, RECONNECT_GRACE_MS + 100);
+      }
       updateMeshes(); broadcastSnapshot();
     } else {
       S.networkReady = false;
       if (!S.connectionLost) {
         S.connectionLost = true;
         $("#networkLabel").textContent = "MẤT KẾT NỐI";
-        $("#gameStatus").textContent = "Mất kết nối với chủ phòng. Hãy quay về sảnh và tham gia lại.";
-        toast("Đã mất kết nối với chủ phòng.");
+        $("#gameStatus").textContent = "Mất kết nối với chủ phòng. YOLO đang thử kết nối lại...";
+        toast("Mất kết nối. Đang thử kết nối lại.");
+        scheduleReconnect();
       }
     }
   });
   conn.on("error", error => {
     console.warn("Peer connection error", error);
     if (session === S.networkSession && !S.host) {
+      S.networkReady = false;
+      S.connectionLost = true;
       $("#networkLabel").textContent = "LỖI KẾT NỐI";
-      $("#gameStatus").textContent = "Kết nối không ổn định. Hãy thử tham gia lại phòng.";
+      $("#gameStatus").textContent = "Kết nối không ổn định. YOLO sẽ tự thử kết nối lại.";
+      scheduleReconnect();
     }
   });
 }
 function leaveNetwork() {
   clearTimeout(S.pointTimer);
   S.networkSession++;
+  clearTimeout(S.reconnectTimer); S.reconnectTimer = null;
+  S.reconnectAttempts = 0;
   for (const conn of S.conns.values()) try { conn.close(); } catch {}
   S.conns.clear();
   if (S.peer) { try { S.peer.destroy(); } catch {} S.peer = null; }
@@ -1165,6 +1310,7 @@ function startTraining() {
 function createRoom() {
   leaveNetwork();
   S.mode = "online"; S.host = true; S.networkReady = false; S.connectionLost = false;
+  clearRoomResume(); S.resumeToken = null; S.hostPeerId = null;
   S.snapshotSeq = 0; S.code = String(Math.floor(1000 + Math.random() * 9000));
   S.id = "host";
   S.players = [createPlayer(0, S.id, S.name, S.color)];
@@ -1187,12 +1333,11 @@ function createRoom() {
     toast("Đã tạo phòng YOLO-" + S.code);
   });
   S.peer.on("connection", conn => {
-    if (S.players.length >= 4) {
-      conn.on("open", () => conn.send({ type: "full" }));
+    const connected = S.players.filter(player => player.connected !== false).length;
+    if (connected >= 4) {
+      conn.on("open", () => conn.send({ type: "full", reason: "Phòng đã đủ 4 người." }));
       setTimeout(() => conn.close(), 500); return;
     }
-    const slot = [0, 1, 2, 3].find(i => !S.players.some(p => p.slot === i));
-    S.players.push(createPlayer(slot, conn.peer, "PLAYER", slot < 2 ? "#70c5e8" : "#ed9b9b"));
     attachConnection(conn, false);
   });
   S.peer.on("error", error => {
@@ -1207,6 +1352,11 @@ function joinRoom() {
   S.mode = "online"; S.host = false; S.networkReady = false; S.connectionLost = false;
   S.inputSeq = 0; S.lastSnapshotSeq = 0; S.lastPingAt = 0; S.rtt = 0;
   S.code = code; S.id = "joining"; S.netBallTarget = null;
+  const savedRoom = loadRoomResume(code);
+  S.resumeToken = savedRoom?.token || makeResumeToken();
+  S.hostPeerId = savedRoom?.hostPeerId || "yolo-pb-" + code;
+  S.reconnectAttempts = 0;
+  saveRoomResume();
   S.players = [createPlayer(0, S.id, S.name, S.color)];
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.phase = "ready"; S.twoBounceStep = 0; S.serveActive = false;
   S.ballBouncedSinceHit = false; S.serveNetContact = false; S.matchWinner = null;
@@ -1224,7 +1374,11 @@ function joinRoom() {
     updateMeshes();
   });
   S.peer.on("error", error => {
-    console.warn(error); $("#gameStatus").textContent = "Không tìm thấy phòng hoặc máy chủ đang bận.";
+    console.warn(error);
+    S.networkReady = false;
+    S.connectionLost = true;
+    $("#gameStatus").textContent = "Không tìm thấy phòng hoặc máy chủ đang bận. YOLO sẽ thử kết nối lại.";
+    scheduleReconnect();
     toast("Không thể kết nối phòng.");
   });
 }
@@ -1242,6 +1396,7 @@ $("#joinCodeInput").addEventListener("keydown", e => { if (e.key === "Enter") jo
 $("#modeOnline").onclick = $("#createRoomButton").onclick = createRoom;
 $("#modePractice").onclick = $("#trainingButton").onclick = startTraining;
 $("#backHomeButton").onclick = () => { leaveNetwork(); showScreen(false); };
+$("#reconnectButton").onclick = reconnectRoom;
 $("#copyRoomButton").onclick = async () => {
   try { await navigator.clipboard.writeText("YOLO-" + S.code); toast("Đã sao chép mã YOLO-" + S.code); }
   catch { toast("Mã phòng: YOLO-" + S.code); }
