@@ -10,7 +10,8 @@ Serve the repository root with any static web server (for example VS Code Live S
 - 3D court, net, lines, ball and court-side environment.
 - A detailed, skinned human GLB athlete with a Mixamo-compatible skeleton, face morph targets and individual skeleton clones for up to four players.
 - T-shirt and dark trouser sport outfit tinting, a paddle attached to the right hand, and each player's chosen name printed on the back.
-- Motion-captured idle/walk clips blended with procedural footwork, body lean, blinking and sport-specific Dink, Slice, Lob, Volley, Drive and Smash swing overlays.
+- Motion-captured idle/walk clips blended with a pickleball ready stance, split-step on incoming net crossings, lateral lunge/recovery, ball tracking with head/eyes, and staged Dink, Slice, Lob, Volley, Drive and Smash stroke animations.
+- Predictive bot interception and smoother acceleration/deceleration; online snapshots synchronize swing, split-step and lunge cues so all four players see the same actions.
 - Smooth acceleration/deceleration for player movement, keyboard controls and mobile virtual joystick / touch shot controls.
 - Training mode with four local/demo players and basic bot movement/returns.
 - Experimental four-player PeerJS room creation/join by a four-digit code.
@@ -26,7 +27,7 @@ The Avatar Studio project identifies its character models and motion capture as 
 ## Important limitations
 This is still a prototype, not a production multiplayer game or a certified rules engine.
 - The current human model is a single male base appearance shared by players, with different shirt colours and names. A proper avatar selector and a broader range of body types are future work.
-- Idle and walk use the source motion-capture clips; pickleball strokes are custom procedural skeletal overlays, not sport-specific motion-capture. High-quality pickleball mocap is still needed for competition-level realism.
+- Idle and walk use the source motion-capture clips. Pickleball ready stance, split-step, lunge, ball tracking and stroke phases are procedural skeletal animations, not sport-specific motion-capture. Dedicated pickleball mocap is still needed for competition-level realism.
 - PeerJS uses public signaling and direct peer connections. NAT/firewall restrictions can prevent some players from connecting; there is no TURN relay.
 - The host browser currently acts as the game authority. If the host closes the tab or loses connection, the room ends.
 - No persistent user accounts, matchmaking, moderation, anti-cheat, robust reconnect, spectator mode or dedicated authoritative server is included.
