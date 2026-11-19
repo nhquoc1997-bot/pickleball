@@ -77,8 +77,10 @@ function syncPlayerUI() {
   $("#playerCount").textContent = String(S.players.length).padStart(2, "0") + " / 04";
 }
 function positionForSlot(slot) {
-  const team = slot < 2 ? 0 : 1;
-  const x = slot % 2 === 0 ? -1.05 : 1.05;
+  // Seat order alternates teams so a room is balanced as players join:
+  // host = Team A, first guest = Team B, second guest = Team A, third guest = Team B.
+  const team = slot % 2 === 0 ? 0 : 1;
+  const x = slot < 2 ? -1.05 : 1.05;
   const z = team === 0 ? 4.65 : -4.65;
   return { team, x, z, rotation: team === 0 ? 0 : Math.PI, slot };
 }
@@ -676,8 +678,8 @@ function startTraining() {
   S.mode = "training"; S.code = "TRAINING"; S.id = "local";
   S.players = [
     { ...createPlayer(0, "local", S.name, S.color), local: true },
-    { ...createPlayer(1, "bot1", "YOLO BOT", "#70c5e8"), bot: true },
-    { ...createPlayer(2, "bot2", "RIVAL 01", "#ed9b9b"), bot: true },
+    { ...createPlayer(1, "bot1", "RIVAL 01", "#ed9b9b"), bot: true },
+    { ...createPlayer(2, "bot2", "YOLO BOT", "#70c5e8"), bot: true },
     { ...createPlayer(3, "bot3", "RIVAL 02", "#ed9b9b"), bot: true }
   ];
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 0; S.rally = 0;
