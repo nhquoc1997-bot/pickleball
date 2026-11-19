@@ -1,4 +1,10 @@
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+import * as THREE from "three";
+import {
+  loadAthleteTemplate,
+  createRiggedAvatar,
+  updateRiggedAvatar,
+  animateRiggedAvatar
+} from "./avatar-rig.js";
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -19,6 +25,7 @@ const S = {
   phase: "ready", expectedBounceTeam: null, twoBounceStep: 0, serveActive: false, sideBounces: [0, 0],
   lastHitTeam: 0, ball: null, velocity: null, shot: "drive", cooldown: 0,
   scene: null, camera: null, renderer: null, clock: new THREE.Clock(),
+  rigTemplate: null, rigLoading: false, rigLoadFailed: false,
   lastNet: 0, lastSnapshot: 0, pointTimer: null, disposed: false
 };
 
@@ -86,8 +93,8 @@ function positionForSlot(slot) {
 }
 function createPlayer(slot, id, name, color) {
   return { id, name: cleanName(name), color: color || "#c7f36b", ...positionForSlot(slot),
-    targetX: null, targetZ: null, targetRotation: null, mesh: null,
-    swing: 0, swingType: "drive", bot: false, botThink: 0 };
+    targetX: null, targetZ: null, targetRotation: null, mesh: null, rigged: false,
+    velocityX: 0, velocityZ: 0, swing: 0, swingType: "drive", bot: false, botThink: 0 };
 }
 function mergePlayers(incoming, snap = false) {
   const previous = new Map(S.players.map(p => [p.id, p]));
@@ -102,20 +109,26 @@ function mergePlayers(incoming, snap = false) {
       return existing;
     }
     return { ...data, targetX: data.x, targetZ: data.z,
-      targetRotation: data.rotation, mesh: null, swing: 0, moving: 0 };
+      targetRotation: data.rotation, mesh: null, rigged: false,
+      velocityX: 0, velocityZ: 0, swing: 0, moving: 0 };
   });
 }
 function updatePlayerLabels() {
   for (const p of S.players) {
     if (!p.mesh) continue;
     const q = p.mesh.userData;
+    if (q.rigged) {
+      updateRiggedAvatar(p.mesh, p);
+      continue;
+    }
+    if (!q.ctx || !q.tex) continue;
     q.ctx.clearRect(0, 0, 512, 256);
     q.ctx.fillStyle = "#142018";
     q.ctx.font = "900 64px Arial";
     q.ctx.textAlign = "center";
     q.ctx.fillText((p.name || "YOLO").slice(0, 14), 256, 160);
     q.tex.needsUpdate = true;
-    q.torso.material.color.set(p.color || "#c7f36b");
+    if (q.torso?.material?.color) q.torso.material.color.set(p.color || "#c7f36b");
   }
 }
 function updateMeshes() {
@@ -128,6 +141,7 @@ function updateMeshes() {
     p.mesh.userData.playerId = p.id;
     p.mesh.position.set(p.x, 0, p.z);
     p.mesh.rotation.y = p.rotation || 0;
+    if (S.rigTemplate && !p.rigged) upgradePlayerToRigged(p);
   }
   const liveMeshes = new Set(S.players.map(p => p.mesh).filter(Boolean));
   for (const child of [...S.scene.children]) {
@@ -135,6 +149,58 @@ function updateMeshes() {
   }
   syncPlayerUI();
   updatePlayerLabels();
+}
+
+function upgradePlayerToRigged(player) {
+  if (!S.scene || !S.rigTemplate || player.rigged) return;
+  const oldMesh = player.mesh;
+  const rigged = createRiggedAvatar(S.rigTemplate, player);
+  S.scene.add(rigged);
+  if (oldMesh) {
+    S.scene.remove(oldMesh);
+    oldMesh.traverse(object => {
+      if (!object.isMesh) return;
+      object.geometry?.dispose();
+      if (Array.isArray(object.material)) object.material.forEach(material => material.dispose());
+      else object.material?.dispose();
+    });
+  }
+  player.mesh = rigged;
+  player.rigged = true;
+}
+
+async function loadRiggedAthletes() {
+  if (S.rigTemplate || S.rigLoading || !S.scene) return;
+  S.rigLoading = true;
+  const status = $("#avatarLoadingStatus");
+  if (status) {
+    status.hidden = false;
+    status.textContent = "ĐANG TẢI VẬN ĐỘNG VIÊN 3D · 0%";
+  }
+  try {
+    const template = await loadAthleteTemplate(progress => {
+      if (status) status.textContent = "ĐANG TẢI VẬN ĐỘNG VIÊN 3D · " + Math.round(progress * 100) + "%";
+    });
+    S.rigTemplate = template;
+    for (const player of S.players) upgradePlayerToRigged(player);
+    updatePlayerLabels();
+    if (status) {
+      status.textContent = "VẬN ĐỘNG VIÊN 3D ĐÃ SẴN SÀNG";
+      setTimeout(() => { status.hidden = true; }, 2600);
+    }
+    $("#gameStatus").textContent = "VẬN ĐỘNG VIÊN 3D ĐÃ SẴN SÀNG · YOLO COURT";
+    toast("Đã tải vận động viên 3D.");
+  } catch (error) {
+    console.warn("YOLO athlete model could not be loaded; using fallback avatars.", error);
+    S.rigLoadFailed = true;
+    if (status) {
+      status.textContent = "KHÔNG TẢI ĐƯỢC MODEL · ĐANG DÙNG NHÂN VẬT DỰ PHÒNG";
+      setTimeout(() => { status.hidden = true; }, 5200);
+    }
+    toast("Không tải được nhân vật 3D; đang dùng bản dự phòng.");
+  } finally {
+    S.rigLoading = false;
+  }
 }
 
 function createAvatar(p) {
@@ -248,7 +314,8 @@ function initScene() {
   S.camera = new THREE.PerspectiveCamera(43, stage.clientWidth / stage.clientHeight, .1, 100);
   S.camera.position.set(0, 11, 17.5); S.camera.lookAt(0, 0, 0);
   S.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-  S.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
+  const compactScreen = window.matchMedia("(max-width: 700px)").matches;
+  S.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, compactScreen ? 1.2 : 1.6));
   S.renderer.setSize(stage.clientWidth, stage.clientHeight);
   S.renderer.shadowMap.enabled = true; S.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   S.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -264,6 +331,7 @@ function initScene() {
   S.ball.castShadow = true; S.ball.position.set(0, .12, 3.7); S.scene.add(S.ball);
   S.velocity = new THREE.Vector3();
   updateMeshes(); resizeRenderer();
+  loadRiggedAthletes();
   $("#loadingScene").classList.add("done");
   setTimeout(() => $("#loadingScene").remove(), 500);
   S.clock.start(); animate();
@@ -284,6 +352,10 @@ function animate() {
 }
 function animatePlayer(p, dt, time) {
   if (!p.mesh) return;
+  if (p.mesh.userData.rigged) {
+    animateRiggedAvatar(p.mesh, p, dt, time);
+    return;
+  }
   const q = p.mesh.userData;
   const moving = p.moving || 0;
   const phase = time * 10 + q.idle;
@@ -322,16 +394,18 @@ function updateGame(dt) {
     const magnitude = Math.hypot(dx, dz);
     if (magnitude > 1) { dx /= magnitude; dz /= magnitude; }
     const speed = 4.5;
-    local.x = THREE.MathUtils.clamp(local.x + dx * speed * dt, -2.55, 2.55);
+    local.velocityX = THREE.MathUtils.damp(local.velocityX || 0, dx * speed, 11, dt);
+    local.velocityZ = THREE.MathUtils.damp(local.velocityZ || 0, dz * speed, 11, dt);
+    local.x = THREE.MathUtils.clamp(local.x + local.velocityX * dt, -2.55, 2.55);
     local.z = local.team === 0
-      ? THREE.MathUtils.clamp(local.z + dz * speed * dt, 1.1, 6.05)
-      : THREE.MathUtils.clamp(local.z + dz * speed * dt, -6.05, -1.1);
+      ? THREE.MathUtils.clamp(local.z + local.velocityZ * dt, 1.1, 6.05)
+      : THREE.MathUtils.clamp(local.z + local.velocityZ * dt, -6.05, -1.1);
     if (S.mode === "online" && !S.host && local.targetX !== null) {
       local.x = THREE.MathUtils.damp(local.x, local.targetX, 5, dt);
       local.z = THREE.MathUtils.damp(local.z, local.targetZ, 5, dt);
     }
     if (magnitude > .08) local.rotation = Math.atan2(-dx, -dz);
-    local.moving = magnitude;
+    local.moving = Math.min(1, Math.hypot(local.velocityX, local.velocityZ) / speed);
     if (local.mesh) {
       local.mesh.position.set(local.x, 0, local.z);
       local.mesh.rotation.y = local.rotation || 0;
@@ -343,9 +417,11 @@ function updateGame(dt) {
   }
   for (const p of S.players) {
     if (p.targetX !== null && p.id !== S.id) {
+      const previousX = p.x, previousZ = p.z;
       p.x = THREE.MathUtils.damp(p.x, p.targetX, 12, dt);
       p.z = THREE.MathUtils.damp(p.z, p.targetZ, 12, dt);
       p.rotation = THREE.MathUtils.damp(p.rotation || 0, p.targetRotation || 0, 10, dt);
+      p.moving = dt > 0 ? Math.min(1, Math.hypot(p.x - previousX, p.z - previousZ) / dt / 4.5) : 0;
       if (p.mesh) { p.mesh.position.set(p.x, 0, p.z); p.mesh.rotation.y = p.rotation; }
     }
     if (p.bot && S.hostOrTraining && S.phase === "rally") updateBot(p, dt);
