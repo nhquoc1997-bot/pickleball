@@ -8,6 +8,7 @@ on:
       - feat/yolo-pickleball-motion-v4
       - feat/yolo-pickleball-gameplay-v5
       - feat/yolo-pickleball-network-v6
+      - feat/yolo-pickleball-rules-v7
   pull_request:
     branches:
       - main
@@ -25,12 +26,15 @@ jobs:
         run: |
           node --input-type=module --check < src/main.js
           node --input-type=module --check < src/avatar-rig.js
+          node --input-type=module --check < src/rules.mjs
       - name: Verify app entry points and import map
         run: |
           test -s index.html
           test -s styles.css
           test -s src/main.js
           test -s src/avatar-rig.js
+          test -s src/rules.mjs
+          test -s tests/rules.test.mjs
           test -s THIRD_PARTY_NOTICES.md
           grep -q 'src/main.js' index.html
           grep -q 'avatar-rig.js' src/main.js
@@ -40,3 +44,8 @@ jobs:
           grep -q 'seq: ++S.snapshotSeq' src/main.js
           grep -q 'message.type === "ping"' src/main.js
           grep -q 'message.type === "pong"' src/main.js
+          grep -q 'isValidServeLanding' src/main.js
+          grep -q 'nextServeState' src/main.js
+          grep -q 'ballBouncedSinceHit' src/main.js
+          grep -q 'scoreCallLabel' index.html
+          node --test tests/rules.test.mjs
