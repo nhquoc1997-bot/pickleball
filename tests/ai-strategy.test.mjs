@@ -84,13 +84,16 @@ test("bot contests only reachable balls when it is allowed to hit", () => {
   const player = { x: 0, z: 3, team: 0 };
   const ball = { x: 0.4, z: 3.4 };
   assert.equal(shouldBotContestBall({
-    player, ball, velocity: { z: -4 }, expectedBounceTeam: 1, cooldown: 0
+    player, ball, expectedBounceTeam: 1, cooldown: 0
   }), true);
   assert.equal(shouldBotContestBall({
-    player, ball, velocity: { z: -4 }, expectedBounceTeam: 0, cooldown: 0
+    player, ball, expectedBounceTeam: 0, cooldown: 0
   }), false);
   assert.equal(shouldBotContestBall({
-    player, ball, velocity: { z: -4 }, expectedBounceTeam: 1, cooldown: 1
+    player, ball, expectedBounceTeam: 1, cooldown: 1
+  }), false);
+  assert.equal(shouldBotContestBall({
+    player, ball: { x: 0.4, z: -3.4 }, expectedBounceTeam: 1, cooldown: 0
   }), false);
 });
 
