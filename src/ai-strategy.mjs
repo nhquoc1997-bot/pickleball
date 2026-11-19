@@ -25,6 +25,18 @@ export function predictIntercept(ball, velocity, team, maxTime = 0.32) {
 export function assignDoublesRoles(players, team, ball, velocity) {
   const teammates = (players || []).filter(player => player.team === team);
   if (!teammates.length) return [];
+  const ballSide = (ball?.z || 0) >= 0 ? 0 : 1;
+  const side = signForTeam(team);
+  if (ballSide !== team) {
+    return [...teammates].sort((a, b) => a.slot - b.slot).map((player, index) => ({
+      id: player.id,
+      role: "advance",
+      targetX: teammates.length > 1 ? (index === 0 ? -1.35 : 1.35) : clamp(player.x, -1.5, 1.5),
+      targetZ: side * 2.58,
+      interceptX: ball?.x || 0,
+      interceptZ: ball?.z || 0
+    }));
+  }
   const intercept = predictIntercept(ball, velocity, team);
   const chaser = teammates.reduce((best, player) => {
     const distance = Math.hypot(player.x - intercept.x, player.z - intercept.z);
