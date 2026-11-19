@@ -445,8 +445,8 @@ function startServe() {
   if (server.mesh) server.mesh.position.set(server.x, 0, server.z);
   const targetX = -server.x * .55;
   S.ball.position.set(server.x, 1.25, server.z - direction * .15);
-  S.velocity.set((targetX - server.x) * .65, 5.4, direction * 10.4);
-  S.phase = "rally"; S.rally = 0; S.twoBounceStep = 0; S.serveActive = true; S.sideBounces = [0, 0];
+  S.velocity.set((targetX - server.x) * .65, 5.4, direction * 8.0);
+  S.phase = "rally"; S.rally = 0; S.twoBounceStep = 0; S.sideBounces = [0, 0];
   S.expectedBounceTeam = 1 - server.team; S.serveActive = true; S.serveTargetX = targetX;
   S.lastHitTeam = server.team; S.cooldown = .25;
   $("#gameStatus").textContent = "SERVE · Giao chéo sân, bóng phải nảy trước khi trả";
@@ -693,7 +693,7 @@ function createRoom() {
   S.id = "host";
   S.players = [createPlayer(0, S.id, S.name, S.color)];
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 0; S.rally = 0;
-  S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.sideBounces = [0, 0];
+  S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.serveActive = false; S.sideBounces = [0, 0];
   syncScore(); $("#roomCodeLabel").textContent = "YOLO-" + S.code;
   $("#networkLabel").textContent = "ĐANG TẠO PHÒNG";
   $("#gameStatus").textContent = "Đang kết nối dịch vụ phòng...";
