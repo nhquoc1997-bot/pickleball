@@ -123,6 +123,7 @@ function updateMeshes() {
       p.mesh = createAvatar(p);
       S.scene.add(p.mesh);
     }
+    p.mesh.userData.playerId = p.id;
     p.mesh.position.set(p.x, 0, p.z);
     p.mesh.rotation.y = p.rotation || 0;
   }
