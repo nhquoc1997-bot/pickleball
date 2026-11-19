@@ -12,6 +12,7 @@ on:
       - feat/yolo-pickleball-ai-v8
       - feat/yolo-pickleball-motion-v9
       - feat/yolo-pickleball-network-v10
+      - feat/yolo-pickleball-stats-v11
   pull_request:
     branches:
       - main
@@ -33,6 +34,7 @@ jobs:
           node --input-type=module --check < src/ai-strategy.mjs
           node --input-type=module --check < src/motion-profile.mjs
           node --input-type=module --check < src/room-state.mjs
+          node --input-type=module --check < src/stats.mjs
       - name: Verify app entry points and import map
         run: |
           test -s index.html
@@ -45,6 +47,8 @@ jobs:
           test -s tests/motion-profile.test.mjs
           test -s src/room-state.mjs
           test -s tests/room-state.test.mjs
+          test -s src/stats.mjs
+          test -s tests/stats.test.mjs
           test -s THIRD_PARTY_NOTICES.md
           grep -q 'src/main.js' index.html
           grep -q 'avatar-rig.js' src/main.js
@@ -67,7 +71,12 @@ jobs:
           grep -q 'scheduleReconnect' src/main.js
           grep -q 'reconnectButton' index.html
           grep -q 'connected: p.connected' src/main.js
+          grep -q 'buildMatchReport' src/main.js
+          grep -q 'playerStats: S.playerStats' src/main.js
+          grep -q 'careerMatches' index.html
+          grep -q 'matchStatsContent' index.html
           node --test tests/rules.test.mjs
           node --test tests/ai-strategy.test.mjs
           node --test tests/motion-profile.test.mjs
           node --test tests/room-state.test.mjs
+          node --test tests/stats.test.mjs

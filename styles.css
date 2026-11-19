@@ -20,3 +20,27 @@
 .player-row.offline{opacity:.55}
 .player-row.offline .player-dot{background:#e6a35d;box-shadow:0 0 0 3px #e6a35d22}
 @media(max-width:700px){.reconnect-button{padding:7px 9px;font-size:9px}.room-tools{gap:7px}}
+
+.game-bottom-actions{display:flex;align-items:center;gap:14px}
+.game-bottom-actions button{border:1px solid #ffffff24;background:#102017;color:#c7f36b;border-radius:3px;padding:6px 9px;font-size:8px;font-weight:800;letter-spacing:.8px}
+.career-card{margin-top:16px;padding:13px;background:#0b1710;border:1px solid #ffffff18;border-radius:4px}
+.career-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.career-grid>div{display:grid;gap:3px}
+.career-grid b{font:800 24px var(--display);color:var(--lime)}
+.career-grid small{font-size:7px;letter-spacing:.7px;color:#91a197}
+.career-card p{margin:12px 0 0;padding-top:9px;border-top:1px solid #ffffff12;font-size:8px;letter-spacing:.5px}
+.stats-card{width:min(100%,560px);max-height:88vh;overflow:auto}
+.match-stats-content{display:grid;gap:8px;margin-top:16px}
+.match-report-score{font:900 34px var(--display);color:var(--lime);padding:10px 0;border-bottom:1px solid #ffffff20}
+.match-stat-row{display:grid;gap:6px;padding:11px 0;border-bottom:1px solid #ffffff12}
+.match-stat-identity{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.match-stat-identity b{font-size:11px;color:#f2f6ef}
+.match-stat-identity small{font-size:8px;color:#9caa9e;letter-spacing:.7px}
+.match-stat-values{font-size:8px;color:#b3c0b5;letter-spacing:.45px;line-height:1.6}
+@media(max-width:720px){
+  .game-bottomline{align-items:flex-start;gap:8px;font-size:7px}
+  .game-bottom-actions{gap:7px;flex-direction:column;align-items:flex-end}
+  .game-bottom-actions button{padding:5px 7px;font-size:7px}
+  .career-grid b{font-size:21px}
+  .match-stat-values{font-size:7px}
+}

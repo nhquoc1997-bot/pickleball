@@ -23,6 +23,13 @@ import {
   expireDisconnectedPlayers,
   roomPresence
 } from "./room-state.mjs";
+import {
+  createEmptyPlayerStats,
+  recordPlayerShot,
+  recordPlayerOutcome,
+  buildMatchReport,
+  updateCareerRecord
+} from "./stats.mjs";
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -42,7 +49,9 @@ const S = {
   score: [0, 0], servingTeam: 0, serverIndex: 1, serverNumber: 2, rally: 0,
   phase: "ready", expectedBounceTeam: null, twoBounceStep: 0, serveActive: false, sideBounces: [0, 0],
   ballBouncedSinceHit: false, serveNetContact: false, matchWinner: null,
-  lastHitTeam: 0, ball: null, velocity: null, spin: null, magnus: null, shot: "drive", cooldown: 0,
+  lastHitTeam: 0, lastHitPlayerId: null,
+  playerStats: {}, matchReport: null, careerSavedForMatch: false,
+  ball: null, velocity: null, spin: null, magnus: null, shot: "drive", cooldown: 0,
   scene: null, camera: null, renderer: null, clock: new THREE.Clock(),
   rigTemplate: null, rigLoading: false, rigLoadFailed: false,
   lastNet: 0, lastSnapshot: 0, pointTimer: null, disposed: false,
@@ -168,6 +177,80 @@ function reconnectRoom() {
     scheduleReconnect();
   }
 }
+function ensurePlayerStats(player) {
+  if (!player) return null;
+  const key = player.statsKey || player.id;
+  player.statsKey = key;
+  if (!S.playerStats[key]) S.playerStats[key] = createEmptyPlayerStats();
+  return key;
+}
+function resetMatchStats() {
+  S.playerStats = {};
+  S.matchReport = null;
+  S.careerSavedForMatch = false;
+  S.lastHitPlayerId = null;
+  for (const player of S.players) ensurePlayerStats(player);
+}
+function readCareerStats() {
+  try { return JSON.parse(localStorage.getItem("yolo-pickleball-career") || "null") || {}; }
+  catch { return {}; }
+}
+function renderCareerStats() {
+  const career = readCareerStats();
+  const matches = career.matches || 0;
+  $("#careerMatches").textContent = String(matches);
+  $("#careerWins").textContent = String(career.wins || 0);
+  $("#careerWinRate").textContent = matches
+    ? Math.round((career.wins || 0) / matches * 100) + "%"
+    : "—";
+  const recent = career.recentMatches?.[0];
+  $("#careerRecent").textContent = recent
+    ? (recent.result + " · " + recent.score.join("–") + " · " + new Date(recent.playedAt).toLocaleDateString())
+    : "CHƯA CÓ TRẬN ĐẤU";
+}
+function saveCareerStats() {
+  if (S.careerSavedForMatch || !S.matchReport) return;
+  const local = S.players.find(player => player.id === S.id);
+  if (!local) return;
+  const updated = updateCareerRecord(readCareerStats(), S.matchReport, local.statsKey || local.id);
+  try {
+    localStorage.setItem("yolo-pickleball-career", JSON.stringify(updated));
+    S.careerSavedForMatch = true;
+    renderCareerStats();
+  } catch (error) {
+    console.warn("Could not save YOLO career stats", error);
+  }
+}
+function renderMatchStats() {
+  const target = $("#matchStatsContent");
+  if (!target) return;
+  target.replaceChildren();
+  const report = S.matchReport || buildMatchReport(
+    S.players, S.playerStats, S.score, S.matchWinner ?? S.servingTeam, Date.now()
+  );
+  const heading = document.createElement("div");
+  heading.className = "match-report-score";
+  heading.textContent = report.score.join(" – ") + (S.phase === "finished" ? " · FINAL" : " · LIVE");
+  target.append(heading);
+  for (const player of report.players) {
+    const row = document.createElement("div");
+    row.className = "match-stat-row";
+    const identity = document.createElement("div");
+    identity.className = "match-stat-identity";
+    const name = document.createElement("b");
+    name.textContent = player.name;
+    const team = document.createElement("small");
+    team.textContent = (player.team === 0 ? "TEAM YOLO" : "OPPONENT") + " · PLAYER " + (player.slot + 1);
+    identity.append(name, team);
+    const stats = document.createElement("div");
+    stats.className = "match-stat-values";
+    const shots = Object.values(player.stats.shots || {}).reduce((sum, value) => sum + value, 0);
+    stats.textContent = shots + " SHOTS  ·  " + player.stats.winners + " WINNERS  ·  "
+      + player.stats.errors + " ERRORS  ·  " + player.stats.serves + " SERVES";
+    row.append(identity, stats);
+    target.append(row);
+  }
+}
 function setName(value) {
   S.name = cleanName(value);
   saveProfile();
@@ -219,7 +302,7 @@ function createPlayer(slot, id, name, color) {
     velocityX: 0, velocityZ: 0, moving: 0, swing: 0, swingType: "drive", swingSide: "forehand",
     splitStep: 0, lunge: 0, lungeSide: 1, lungeStrength: 1, lungeCooldown: 0,
     volleyFollowThrough: 0, bot: false, botThink: 0,
-    connected: true, resumeToken: null, disconnectUntil: 0 };
+    connected: true, resumeToken: null, disconnectUntil: 0, statsKey: id };
 }
 function mergePlayers(incoming, snap = false) {
   const previous = new Map(S.players.map(p => [p.id, p]));
@@ -228,6 +311,7 @@ function mergePlayers(incoming, snap = false) {
     if (existing) {
       Object.assign(existing, {
         name: data.name, color: data.color, team: data.team, slot: data.slot,
+        statsKey: data.statsKey || existing.statsKey || data.id,
         connected: data.connected !== false,
         swing: data.swing ?? existing.swing ?? 0,
         swingType: data.swingType ?? existing.swingType ?? "drive",
@@ -252,7 +336,8 @@ function mergePlayers(incoming, snap = false) {
       lunge: data.lunge || 0, lungeSide: data.lungeSide || 1,
       lungeStrength: data.lungeStrength || 1, lungeCooldown: 0,
       volleyFollowThrough: data.volleyFollowThrough || 0,
-      connected: data.connected !== false, resumeToken: null, disconnectUntil: 0 };
+      connected: data.connected !== false, resumeToken: null, disconnectUntil: 0,
+      statsKey: data.statsKey || data.id };
   });
 }
 function updatePlayerLabels() {
@@ -600,7 +685,7 @@ function updateGame(dt) {
       p.volleyFollowThrough = Math.max(0, p.volleyFollowThrough - dt);
       if (S.phase === "rally" && isInKitchen(p)) {
         p.volleyFollowThrough = 0;
-        awardPoint(1 - p.team, "Đà sau cú volley đưa người chơi vào Kitchen");
+        awardPoint(1 - p.team, "Đà sau cú volley đưa người chơi vào Kitchen", p.id);
       }
     }
     if (p.bot && S.hostOrTraining && S.phase === "rally") updateBot(p, dt);
@@ -769,7 +854,7 @@ function simulateBall(dt) {
       });
       S.serveActive = false;
       if (!inCorrectServiceArea) {
-        awardPoint(1 - S.servingTeam, "Giao bóng lỗi: phải vào đúng ô chéo, ngoài Kitchen");
+        awardPoint(1 - S.servingTeam, "Giao bóng lỗi: phải vào đúng ô chéo, ngoài Kitchen", S.lastHitPlayerId);
         return;
       }
     }
@@ -778,7 +863,12 @@ function simulateBall(dt) {
       S.expectedBounceTeam = S.twoBounceStep === 1 ? 1 - side : null;
     }
     if (S.sideBounces[side] >= 2) {
-      awardPoint(1 - side, "Bóng nảy hai lần");
+      const faultPlayer = S.players.reduce((best, player) => {
+        if (player.team !== side) return best;
+        const distance = Math.hypot(player.x - S.ball.position.x, player.z - S.ball.position.z);
+        return !best || distance < best.distance ? { id: player.id, distance } : best;
+      }, null);
+      awardPoint(1 - side, "Bóng nảy hai lần", faultPlayer?.id || null);
       return;
     }
     $("#gameStatus").textContent = S.expectedBounceTeam === null
@@ -794,7 +884,13 @@ function simulateBall(dt) {
     S.velocity.y = 0;
     if (Math.hypot(S.velocity.x, S.velocity.z) < .28) {
       S.velocity.set(0, 0, 0);
-      awardPoint(1 - S.lastHitTeam, "Bóng không được trả lại");
+      const defendingTeam = 1 - S.lastHitTeam;
+      const faultPlayer = S.players.reduce((best, player) => {
+        if (player.team !== defendingTeam) return best;
+        const distance = Math.hypot(player.x - S.ball.position.x, player.z - S.ball.position.z);
+        return !best || distance < best.distance ? { id: player.id, distance } : best;
+      }, null);
+      awardPoint(1 - S.lastHitTeam, "Bóng không được trả lại", faultPlayer?.id || null);
     }
   }
 }
@@ -836,7 +932,10 @@ function startServe(requestedBy = S.id) {
   S.phase = "rally"; S.rally = 0; S.twoBounceStep = 0; S.sideBounces = [0, 0];
   S.ballBouncedSinceHit = false; S.serveNetContact = false;
   S.expectedBounceTeam = 1 - server.team; S.serveActive = true; S.serveTargetX = targetX;
-  S.lastHitTeam = server.team; S.cooldown = .25;
+  S.lastHitTeam = server.team; S.lastHitPlayerId = server.id;
+  const serverStatsKey = ensurePlayerStats(server);
+  S.playerStats[serverStatsKey] = recordPlayerShot(S.playerStats[serverStatsKey], "serve", true);
+  S.cooldown = .25;
   $("#gameStatus").textContent = "SERVE · Giao dưới tay chéo sân; bóng phải nảy trước khi trả";
   syncScore();
   if (server.id !== S.id) toast("Đội đối phương giao bóng.");
@@ -880,12 +979,12 @@ function performHit(shot, playerId, fromBot, aimX = null) {
     return;
   }
   if (S.expectedBounceTeam === p.team) {
-    awardPoint(1 - p.team, "Vi phạm luật bóng phải nảy");
+    awardPoint(1 - p.team, "Vi phạm luật bóng phải nảy", p.id);
     return;
   }
   const isActualVolley = !S.ballBouncedSinceHit;
   if (isActualVolley && isInKitchen(p)) {
-    awardPoint(1 - p.team, "Volley khi đang chạm Kitchen");
+    awardPoint(1 - p.team, "Volley khi đang chạm Kitchen", p.id);
     return;
   }
   const spec = SHOTS[shot] || SHOTS.drive;
@@ -904,6 +1003,9 @@ function performHit(shot, playerId, fromBot, aimX = null) {
   if (isActualVolley) p.volleyFollowThrough = .9;
   S.ballBouncedSinceHit = false;
   S.lastHitTeam = p.team;
+  S.lastHitPlayerId = p.id;
+  const statsKey = ensurePlayerStats(p);
+  S.playerStats[statsKey] = recordPlayerShot(S.playerStats[statsKey], shot);
   S.sideBounces = [0, 0];
   S.cooldown = .22;
   p.swing = 1; p.swingType = shot;
@@ -930,7 +1032,7 @@ function switchTeamSides(team) {
     if (player.mesh) player.mesh.position.x = player.x;
   }
 }
-function awardPoint(winner, reason) {
+function awardPoint(winner, reason, responsiblePlayerId = null) {
   if (S.phase !== "rally") return;
   S.phase = "point";
   S.velocity.set(0, 0, 0);
@@ -949,15 +1051,30 @@ function awardPoint(winner, reason) {
   S.serverNumber = transition.serverNumber;
   if (transition.switchSides) switchTeamSides(S.servingTeam);
 
+  const actorId = responsiblePlayerId || S.lastHitPlayerId;
+  const actor = S.players.find(player => player.id === actorId);
+  if (actor) {
+    const statsKey = ensurePlayerStats(actor);
+    const explicitFault = Boolean(responsiblePlayerId);
+    const serveFault = reason.toLowerCase().includes("giao bóng lỗi");
+    S.playerStats[statsKey] = recordPlayerOutcome(S.playerStats[statsKey], {
+      won: !explicitFault && winner === S.lastHitTeam,
+      error: explicitFault || winner !== S.lastHitTeam,
+      serveFault
+    });
+  }
   const won = isMatchWon(S.score, winner);
   $("#gameStatus").textContent = (winner === 0 ? "TEAM YOLO" : "OPPONENT") + " THẮNG PHA BÓNG · " + reason;
   syncScore();
   if (won) {
     S.phase = "finished";
     S.matchWinner = winner;
+    S.matchReport = buildMatchReport(S.players, S.playerStats, S.score, winner, Date.now());
     $("#gameStatus").textContent = "MATCH FINAL · " + (winner === 0 ? "TEAM YOLO" : "OPPONENT")
       + " CHIẾN THẮNG · " + S.score[0] + "–" + S.score[1];
     syncScore();
+    renderMatchStats();
+    saveCareerStats();
     toast("Trận đấu kết thúc. Đội thắng: " + (winner === 0 ? "YOLO" : "Đối thủ"));
     return;
   }
@@ -1044,13 +1161,15 @@ function serializePlayers() {
     splitStep: p.splitStep || 0, lunge: p.lunge || 0,
     lungeSide: p.lungeSide || 1, lungeStrength: p.lungeStrength || 1,
     volleyFollowThrough: p.volleyFollowThrough || 0,
-    connected: p.connected !== false
+    connected: p.connected !== false,
+    statsKey: p.statsKey || p.id
   }));
 }
 function sendWelcome(conn) {
   const player = S.players.find(p => p.id === conn.peer);
   conn.send({
-    type: "welcome", players: serializePlayers(), score: [...S.score],
+    type: "welcome", players: serializePlayers(), playerStats: S.playerStats,
+    matchReport: S.matchReport, score: [...S.score],
     servingTeam: S.servingTeam, serverIndex: S.serverIndex,
     serverNumber: S.serverNumber, matchWinner: S.matchWinner,
     hostId: S.id, resumeToken: player?.resumeToken || null
@@ -1062,7 +1181,7 @@ function broadcastSnapshot() {
     type: "snapshot",
     seq: ++S.snapshotSeq,
     serverTime: Date.now(),
-    players: serializePlayers(),
+    players: serializePlayers(), playerStats: S.playerStats, matchReport: S.matchReport,
     score: [...S.score], servingTeam: S.servingTeam, serverIndex: S.serverIndex, serverNumber: S.serverNumber,
     matchWinner: S.matchWinner, rally: S.rally, phase: S.phase, expectedBounceTeam: S.expectedBounceTeam,
     twoBounceStep: S.twoBounceStep, serveActive: S.serveActive, sideBounces: S.sideBounces,
@@ -1133,6 +1252,7 @@ function attachConnection(conn, isGuest) {
         }
         player = createPlayer(slot, conn.peer, "PLAYER", slot < 2 ? "#70c5e8" : "#ed9b9b");
         player.resumeToken = token || makeResumeToken();
+        player.statsKey = player.resumeToken;
         S.players.push(player);
       }
       joined = true;
@@ -1142,6 +1262,7 @@ function attachConnection(conn, isGuest) {
         ? message.color : player.color || "#70c5e8";
       player.connected = true;
       player.disconnectUntil = 0;
+      ensurePlayerStats(player);
       sendWelcome(conn);
       updateMeshes(); syncScore(); broadcastSnapshot();
     } else if (message.type === "input" && S.host) {
@@ -1188,6 +1309,8 @@ function attachConnection(conn, isGuest) {
       saveRoomResume();
       $("#reconnectButton").hidden = true;
       mergePlayers(message.players || S.players, true);
+      S.playerStats = message.playerStats || S.playerStats;
+      S.matchReport = message.matchReport || null;
       S.score = message.score || [0, 0];
       S.servingTeam = message.servingTeam ?? 0;
       S.serverIndex = message.serverIndex ?? 0;
@@ -1196,6 +1319,8 @@ function attachConnection(conn, isGuest) {
       $("#networkLabel").textContent = "PHÒNG ONLINE · ĐÃ KẾT NỐI";
       $("#gameStatus").textContent = "ĐÃ KẾT NỐI · ĐANG ĐỒNG BỘ TRẬN ĐẤU";
       syncScore(); updateMeshes();
+      if (S.matchReport) saveCareerStats();
+      renderCareerStats();
     } else if (message.type === "snapshot" && !S.host) {
       if (Number.isSafeInteger(message.seq) && message.seq <= S.lastSnapshotSeq) return;
       if (Number.isSafeInteger(message.seq)) S.lastSnapshotSeq = message.seq;
@@ -1206,6 +1331,8 @@ function attachConnection(conn, isGuest) {
       clearTimeout(S.reconnectTimer); S.reconnectTimer = null;
       $("#reconnectButton").hidden = true;
       mergePlayers(message.players || S.players);
+      S.playerStats = message.playerStats || S.playerStats;
+      S.matchReport = message.matchReport || S.matchReport;
       S.score = message.score || S.score;
       S.servingTeam = message.servingTeam ?? S.servingTeam;
       S.serverIndex = message.serverIndex ?? S.serverIndex;
@@ -1224,6 +1351,8 @@ function attachConnection(conn, isGuest) {
       }
       $("#gameStatus").textContent = message.status || "";
       syncScore(); updateMeshes();
+      if (S.phase === "finished" && S.matchReport) saveCareerStats();
+      renderCareerStats();
     } else if (message.type === "full") {
       S.networkReady = false;
       S.connectionLost = true;
@@ -1298,6 +1427,7 @@ function startTraining() {
     { ...createPlayer(2, "bot2", "YOLO BOT", "#70c5e8"), bot: true },
     { ...createPlayer(3, "bot3", "RIVAL 02", "#ed9b9b"), bot: true }
   ];
+  resetMatchStats();
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.rally = 0;
   S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.serveActive = false; S.sideBounces = [0, 0];
   S.ballBouncedSinceHit = false; S.serveNetContact = false; S.matchWinner = null;
@@ -1314,6 +1444,7 @@ function createRoom() {
   S.snapshotSeq = 0; S.code = String(Math.floor(1000 + Math.random() * 9000));
   S.id = "host";
   S.players = [createPlayer(0, S.id, S.name, S.color)];
+  resetMatchStats();
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.rally = 0;
   S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.serveActive = false; S.sideBounces = [0, 0];
   S.ballBouncedSinceHit = false; S.serveNetContact = false; S.matchWinner = null;
@@ -1358,6 +1489,7 @@ function joinRoom() {
   S.reconnectAttempts = 0;
   saveRoomResume();
   S.players = [createPlayer(0, S.id, S.name, S.color)];
+  resetMatchStats();
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.phase = "ready"; S.twoBounceStep = 0; S.serveActive = false;
   S.ballBouncedSinceHit = false; S.serveNetContact = false; S.matchWinner = null;
   $("#roomCodeLabel").textContent = "YOLO-" + code;
@@ -1383,8 +1515,17 @@ function joinRoom() {
   });
 }
 
-$("#profileButton").onclick = () => { $("#profileNameInput").value = S.name; $("#profileModal").hidden = false; };
+$("#profileButton").onclick = () => {
+  $("#profileNameInput").value = S.name;
+  renderCareerStats();
+  $("#profileModal").hidden = false;
+};
 $("#closeProfileModal").onclick = () => $("#profileModal").hidden = true;
+$("#statsButton").onclick = () => {
+  renderMatchStats();
+  $("#matchStatsModal").hidden = false;
+};
+$("#closeMatchStats").onclick = () => $("#matchStatsModal").hidden = true;
 $("#saveProfileButton").onclick = () => { setName($("#profileNameInput").value); $("#profileModal").hidden = true; toast("Đã lưu tên người chơi."); };
 $("#jerseyInput").addEventListener("input", e => setName(e.target.value));
 $("#rulesButton").onclick = () => $("#rulesModal").hidden = false;
@@ -1415,3 +1556,4 @@ document.documentElement.style.setProperty("--shirt", S.color);
 $(".color-dot").forEach(btn => btn.classList.toggle("selected", btn.dataset.color === S.color));
 setName(S.name);
 syncPlayerUI();
+renderCareerStats();
