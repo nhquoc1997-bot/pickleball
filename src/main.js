@@ -264,6 +264,7 @@ function setName(value) {
   if (local) local.name = S.name;
   updatePlayerLabels();
   syncPlayerUI();
+renderCareerStats();
   syncScore();
 }
 function syncPlayerUI() {
@@ -1504,8 +1505,17 @@ function joinRoom() {
   });
 }
 
-$("#profileButton").onclick = () => { $("#profileNameInput").value = S.name; $("#profileModal").hidden = false; };
+$("#profileButton").onclick = () => {
+  $("#profileNameInput").value = S.name;
+  renderCareerStats();
+  $("#profileModal").hidden = false;
+};
 $("#closeProfileModal").onclick = () => $("#profileModal").hidden = true;
+$("#statsButton").onclick = () => {
+  renderMatchStats();
+  $("#matchStatsModal").hidden = false;
+};
+$("#closeMatchStats").onclick = () => $("#matchStatsModal").hidden = true;
 $("#saveProfileButton").onclick = () => { setName($("#profileNameInput").value); $("#profileModal").hidden = true; toast("Đã lưu tên người chơi."); };
 $("#jerseyInput").addEventListener("input", e => setName(e.target.value));
 $("#rulesButton").onclick = () => $("#rulesModal").hidden = false;
