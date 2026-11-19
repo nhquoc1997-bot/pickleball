@@ -15,9 +15,8 @@ export function rightCourtSign(team) {
 
 export function isInKitchen(player, kitchenDepth = PICKLEBALL_RULES.kitchenDepth, margin = 0.12) {
   if (!player || !Number.isFinite(player.z)) return false;
-  return player.team === 0
-    ? player.z <= kitchenDepth + margin
-    : player.z >= -kitchenDepth - margin;
+  // The non-volley zone is the strip on both sides of the net.
+  return Math.abs(player.z) <= kitchenDepth + margin;
 }
 
 export function isValidServeLanding({
