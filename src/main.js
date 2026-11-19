@@ -1224,7 +1224,9 @@ function attachConnection(conn, isGuest) {
   conn.on("close", () => {
     if (session !== S.networkSession) return;
     clearTimeout(handshakeTimer);
-    if (S.conns.get(conn.peer) === conn) S.conns.delete(conn.peer);
+    const isCurrentConnection = S.conns.get(conn.peer) === conn;
+    if (isCurrentConnection) S.conns.delete(conn.peer);
+    if (!isCurrentConnection) return;
     if (S.host) {
       const player = S.players.find(p => p.id === conn.peer);
       if (player && player.slot !== 0 && joined) {
@@ -1257,8 +1259,11 @@ function attachConnection(conn, isGuest) {
   conn.on("error", error => {
     console.warn("Peer connection error", error);
     if (session === S.networkSession && !S.host) {
+      S.networkReady = false;
+      S.connectionLost = true;
       $("#networkLabel").textContent = "LỖI KẾT NỐI";
-      $("#gameStatus").textContent = "Kết nối không ổn định. Hãy thử tham gia lại phòng.";
+      $("#gameStatus").textContent = "Kết nối không ổn định. YOLO sẽ tự thử kết nối lại.";
+      scheduleReconnect();
     }
   });
 }
@@ -1357,7 +1362,11 @@ function joinRoom() {
     updateMeshes();
   });
   S.peer.on("error", error => {
-    console.warn(error); $("#gameStatus").textContent = "Không tìm thấy phòng hoặc máy chủ đang bận.";
+    console.warn(error);
+    S.networkReady = false;
+    S.connectionLost = true;
+    $("#gameStatus").textContent = "Không tìm thấy phòng hoặc máy chủ đang bận. Có thể thử kết nối lại.";
+    $("#reconnectButton").hidden = false;
     toast("Không thể kết nối phòng.");
   });
 }
