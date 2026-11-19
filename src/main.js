@@ -138,8 +138,13 @@ function scheduleReconnect() {
   clearTimeout(S.reconnectTimer);
   S.reconnectTimer = setTimeout(() => {
     if (S.networkReady || !S.connectionLost || !S.peer || !S.hostPeerId) return;
-    const conn = S.peer.connect(S.hostPeerId, { reliable: true });
-    attachConnection(conn, true);
+    try {
+      const conn = S.peer.connect(S.hostPeerId, { reliable: true });
+      attachConnection(conn, true);
+    } catch (error) {
+      console.warn("Automatic reconnect attempt failed", error);
+      scheduleReconnect();
+    }
   }, delay);
 }
 function reconnectRoom() {
@@ -155,8 +160,13 @@ function reconnectRoom() {
   $("#reconnectButton").hidden = true;
   $("#networkLabel").textContent = "ĐANG KẾT NỐI LẠI";
   $("#gameStatus").textContent = "Đang khôi phục vị trí và trạng thái trận đấu...";
-  const conn = S.peer.connect(S.hostPeerId, { reliable: true });
-  attachConnection(conn, true);
+  try {
+    const conn = S.peer.connect(S.hostPeerId, { reliable: true });
+    attachConnection(conn, true);
+  } catch (error) {
+    console.warn("Manual reconnect attempt failed", error);
+    scheduleReconnect();
+  }
 }
 function setName(value) {
   S.name = cleanName(value);
