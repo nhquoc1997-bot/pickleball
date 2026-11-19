@@ -16,7 +16,7 @@ const S = {
   peer: null, conns: new Map(), host: false, networkReady: false,
   players: [], id: "local", keys: new Set(), joy: { x: 0, z: 0 },
   score: [0, 0], servingTeam: 0, serverIndex: 0, rally: 0,
-  phase: "ready", expectedBounceTeam: null, sideBounces: [0, 0],
+  phase: "ready", expectedBounceTeam: null, twoBounceStep: 0, sideBounces: [0, 0],
   lastHitTeam: 0, ball: null, velocity: null, shot: "drive", cooldown: 0,
   scene: null, camera: null, renderer: null, clock: new THREE.Clock(),
   lastNet: 0, lastSnapshot: 0, pointTimer: null, disposed: false
@@ -86,6 +86,22 @@ function createPlayer(slot, id, name, color) {
   return { id, name: cleanName(name), color: color || "#c7f36b", ...positionForSlot(slot),
     targetX: null, targetZ: null, targetRotation: null, mesh: null,
     swing: 0, swingType: "drive", bot: false, botThink: 0 };
+}
+function mergePlayers(incoming) {
+  const previous = new Map(S.players.map(p => [p.id, p]));
+  S.players = (incoming || []).map(data => {
+    const existing = previous.get(data.id);
+    if (existing) {
+      Object.assign(existing, {
+        name: data.name, color: data.color, x: data.x, z: data.z,
+        rotation: data.rotation, team: data.team, slot: data.slot,
+        targetX: data.x, targetZ: data.z, targetRotation: data.rotation
+      });
+      return existing;
+    }
+    return { ...data, targetX: data.x, targetZ: data.z,
+      targetRotation: data.rotation, mesh: null, swing: 0, moving: 0 };
+  });
 }
 function updatePlayerLabels() {
   for (const p of S.players) {
@@ -378,7 +394,10 @@ function simulateBall(dt) {
     if (S.velocity.y < .65) S.velocity.y = 0;
     const side = S.ball.position.z >= 0 ? 0 : 1;
     S.sideBounces[side] += 1;
-    if (S.expectedBounceTeam === side) S.expectedBounceTeam = side === 0 ? 1 : null;
+    if (S.twoBounceStep < 2 && S.expectedBounceTeam === side) {
+      S.twoBounceStep += 1;
+      S.expectedBounceTeam = S.twoBounceStep === 1 ? 1 - side : null;
+    }
     if (S.sideBounces[side] >= 2) {
       awardPoint(1 - side, "Bóng nảy hai lần");
       return;
@@ -411,7 +430,7 @@ function startServe() {
   const targetX = -server.x * .55;
   S.ball.position.set(server.x, 1.25, server.z - direction * .15);
   S.velocity.set((targetX - server.x) * .65, 5.4, direction * 10.4);
-  S.phase = "rally"; S.rally = 0; S.sideBounces = [0, 0];
+  S.phase = "rally"; S.rally = 0; S.twoBounceStep = 0; S.sideBounces = [0, 0];
   S.expectedBounceTeam = 1 - server.team;
   S.lastHitTeam = server.team; S.cooldown = .25;
   $("#gameStatus").textContent = "SERVE · Giao chéo sân, bóng phải nảy trước khi trả";
@@ -445,8 +464,7 @@ function performHit(shot, playerId, fromBot) {
   }
   // Volleying while standing in the non-volley zone is a fault.
   const inKitchen = p.team === 0 ? p.z < COURT.kitchen : p.z > -COURT.kitchen;
-  const ballHasBounced = S.sideBounces[p.team] > 0 || S.expectedBounceTeam === null;
-  if (shot === "volley" && inKitchen && !ballHasBounced) {
+  if (shot === "volley" && inKitchen) {
     awardPoint(1 - p.team, "Volley trong vùng Kitchen");
     return;
   }
@@ -505,8 +523,8 @@ function selectShot(shot) {
 }
 $$("[data-shot]").forEach(btn => btn.addEventListener("click", () => {
   const shot = btn.dataset.shot;
-  if (S.shot === shot) attemptShot(shot);
-  else selectShot(shot);
+  selectShot(shot);
+  if (S.phase === "rally") attemptShot(shot);
 }));
 $("#serveButton").onclick = startServe;
 $$("[data-action='serve']").forEach(btn => btn.onclick = startServe);
@@ -554,7 +572,7 @@ function broadcastSnapshot() {
       rotation: p.rotation, team: p.team, slot: p.slot })),
     score: S.score, servingTeam: S.servingTeam, serverIndex: S.serverIndex,
     rally: S.rally, phase: S.phase, expectedBounceTeam: S.expectedBounceTeam,
-    sideBounces: S.sideBounces,
+    twoBounceStep: S.twoBounceStep, sideBounces: S.sideBounces,
     ball: S.ball ? { x: S.ball.position.x, y: S.ball.position.y, z: S.ball.position.z,
       vx: S.velocity.x, vy: S.velocity.y, vz: S.velocity.z } : null,
     status: $("#gameStatus").textContent
@@ -595,19 +613,20 @@ function attachConnection(conn, isGuest) {
     } else if (message.type === "serve" && S.host) {
       startServe();
     } else if (message.type === "welcome" && !S.host) {
-      S.players = message.players || S.players;
+      mergePlayers(message.players || S.players);
       S.score = message.score || [0, 0];
       S.servingTeam = message.servingTeam || 0;
       S.serverIndex = message.serverIndex || 0;
       syncScore(); updateMeshes();
     } else if (message.type === "snapshot" && !S.host) {
-      S.players = message.players || S.players;
+      mergePlayers(message.players || S.players);
       S.score = message.score || S.score;
       S.servingTeam = message.servingTeam ?? S.servingTeam;
       S.serverIndex = message.serverIndex ?? S.serverIndex;
       S.rally = message.rally ?? S.rally;
       S.phase = message.phase || S.phase;
       S.expectedBounceTeam = message.expectedBounceTeam;
+      S.twoBounceStep = message.twoBounceStep ?? S.twoBounceStep;
       S.sideBounces = message.sideBounces || [0, 0];
       if (message.ball && S.ball) {
         S.ball.position.set(message.ball.x, message.ball.y, message.ball.z);
@@ -645,7 +664,7 @@ function startTraining() {
     { ...createPlayer(3, "bot3", "RIVAL 02", "#ed9b9b"), bot: true }
   ];
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 0; S.rally = 0;
-  S.phase = "ready"; S.expectedBounceTeam = null; S.sideBounces = [0, 0];
+  S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.sideBounces = [0, 0];
   syncScore(); $("#roomCodeLabel").textContent = "TRAINING";
   $("#networkLabel").textContent = "CHẾ ĐỘ LUYỆN TẬP";
   $("#gameStatus").textContent = "SẴN SÀNG · Nhấn SERVE để bắt đầu";
@@ -657,7 +676,7 @@ function createRoom() {
   S.id = "host";
   S.players = [createPlayer(0, S.id, S.name, S.color)];
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 0; S.rally = 0;
-  S.phase = "ready"; S.expectedBounceTeam = null; S.sideBounces = [0, 0];
+  S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.sideBounces = [0, 0];
   syncScore(); $("#roomCodeLabel").textContent = "YOLO-" + S.code;
   $("#networkLabel").textContent = "ĐANG TẠO PHÒNG";
   $("#gameStatus").textContent = "Đang kết nối dịch vụ phòng...";
@@ -693,7 +712,7 @@ function joinRoom() {
   leaveNetwork();
   S.mode = "online"; S.host = false; S.code = code; S.id = "joining";
   S.players = [createPlayer(0, S.id, S.name, S.color)];
-  S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 0; S.phase = "ready";
+  S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 0; S.phase = "ready"; S.twoBounceStep = 0;
   $("#roomCodeLabel").textContent = "YOLO-" + code;
   $("#networkLabel").textContent = "ĐANG KẾT NỐI";
   $("#gameStatus").textContent = "Đang kết nối chủ phòng...";
