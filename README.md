@@ -12,6 +12,7 @@ Serve the repository root with any static web server (for example VS Code Live S
 - T-shirt and dark trouser sport outfit tinting, a paddle attached to the right hand, and each player's chosen name printed on the back.
 - Motion-captured idle/walk clips blended with a pickleball ready stance, split-step on incoming net crossings, lateral lunge/recovery, ball tracking with head/eyes, and staged Dink, Slice, Lob, Volley, Drive and Smash stroke animations.
 - Predictive bot interception and smoother acceleration/deceleration; online snapshots synchronize swing, split-step and lunge cues so all four players see the same actions.
+- V8 tactical doubles AI: bots assign a single chaser and a partner-cover role, advance together to a Kitchen-ready formation when play moves to the opposite court, and choose Dink, Slice, Lob, Drive or Smash based on contact height and opponent spacing.
 - Smooth acceleration/deceleration for player movement, keyboard controls and a larger mobile analog joystick with deadzone filtering, safe-area spacing and thumb-friendly shot buttons.
 - Local player profile remembers the jersey name and shirt colour on the same device.
 - Training mode with four local/demo players and basic bot movement/returns.
@@ -38,6 +39,7 @@ This is still a prototype, not a production multiplayer game or a certified rule
 - PeerJS uses public signaling and direct peer connections. V6 adds heartbeat/latency checks and clearer disconnect handling, but NAT/firewall restrictions can still prevent some players from connecting; there is no TURN relay.
 - The host browser currently acts as the game authority. Guests are notified when the host connection is lost, but there is no host migration or automatic rejoin; if the host closes the tab, the room ends.
 - No persistent user accounts, matchmaking, moderation, anti-cheat, robust reconnect, spectator mode or dedicated authoritative server is included.
+- V8 training bots use a lightweight tactical policy and heuristic court coverage. They are not trained neural opponents and still need human playtesting and difficulty tuning.
 - V7 covers the core recreational doubles score/serve sequence, diagonal service-box landing, no-let serves and Kitchen volley/momentum faults, with automated unit tests for the pure rules. It is not a certified tournament rules engine: foot-fault timing, referee line calls, hinder/replay cases, stacking/position exceptions and tournament-specific formats still need implementation and live validation.
 - Physics is still an arcade approximation: spin, drag and bounce are implemented but not calibrated against measured ball data. Paddle contact uses a 3D proximity window around the paddle rather than a full rigid-body racket collision.
 
