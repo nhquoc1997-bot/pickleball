@@ -11,6 +11,11 @@ import {
   nextServeState,
   isMatchWon
 } from "./rules.mjs";
+import {
+  assignDoublesRoles,
+  chooseBotShot,
+  shouldBotContestBall
+} from "./ai-strategy.mjs";
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -526,45 +531,63 @@ function updateGame(dt) {
 Object.defineProperty(S, "hostOrTraining", { get() { return S.host || S.mode === "training"; } });
 
 function updateBot(p, dt) {
-  if (!S.ball || !S.velocity) return;
-  const ballSide = S.ball.position.z >= 0 ? 0 : 1;
-  if (ballSide !== p.team) return;
-  const timeToIntercept = THREE.MathUtils.clamp(
-    Math.abs(S.ball.position.z - p.z) / Math.max(4, Math.abs(S.velocity.z)), 0, .28
-  );
-  const targetX = THREE.MathUtils.clamp(S.ball.position.x + S.velocity.x * timeToIntercept, -2.35, 2.35);
-  const targetZ = p.team === 0
-    ? THREE.MathUtils.clamp(S.ball.position.z + .62, 1.15, 7.15)
-    : THREE.MathUtils.clamp(S.ball.position.z - .62, -7.15, -1.15);
-  const previousX = p.x, previousZ = p.z;
-  const toX = targetX - p.x, toZ = targetZ - p.z;
+  if (!S.ball || !S.velocity || S.phase !== "rally") return;
+  const roles = assignDoublesRoles(S.players, p.team, {
+    x: S.ball.position.x, y: S.ball.position.y, z: S.ball.position.z
+  }, {
+    x: S.velocity.x, y: S.velocity.y, z: S.velocity.z
+  });
+  const role = roles.find(item => item.id === p.id);
+  if (!role) return;
+  p.botRole = role.role;
+
+  const toX = role.targetX - p.x;
+  const toZ = role.targetZ - p.z;
   const distanceToTarget = Math.hypot(toX, toZ);
-  const desiredSpeed = Math.min(4.15, distanceToTarget * 3.3);
+  const roleSpeed = role.role === "chaser" ? 4.45 : role.role === "advance" ? 3.65 : 3.15;
+  const desiredSpeed = Math.min(roleSpeed, distanceToTarget * 3.1);
   const desiredX = distanceToTarget > .001 ? toX / distanceToTarget * desiredSpeed : 0;
   const desiredZ = distanceToTarget > .001 ? toZ / distanceToTarget * desiredSpeed : 0;
-  p.velocityX = THREE.MathUtils.damp(p.velocityX || 0, desiredX, 8.5, dt);
-  p.velocityZ = THREE.MathUtils.damp(p.velocityZ || 0, desiredZ, 8.5, dt);
+  p.velocityX = THREE.MathUtils.damp(p.velocityX || 0, desiredX, 8.2, dt);
+  p.velocityZ = THREE.MathUtils.damp(p.velocityZ || 0, desiredZ, 8.2, dt);
   p.x = THREE.MathUtils.clamp(p.x + p.velocityX * dt, -2.55, 2.55);
-  p.z = p.team === 0
-    ? THREE.MathUtils.clamp(p.z + p.velocityZ * dt, 1.1, 7.15)
-    : THREE.MathUtils.clamp(p.z + p.velocityZ * dt, -7.15, -1.1);
+  p.z = THREE.MathUtils.clamp(p.z + p.velocityZ * dt,
+    p.team === 0 ? 1.1 : -7.15,
+    p.team === 0 ? 7.15 : -1.1);
   p.moving = Math.min(1, Math.hypot(p.velocityX, p.velocityZ) / 4.5);
   p.rotation = Math.atan2(-(S.ball.position.x - p.x), -(S.ball.position.z - p.z));
-  if (p.mesh) { p.mesh.position.set(p.x, 0, p.z); p.mesh.rotation.y = p.rotation; }
-  p.botThink = Math.max(0, p.botThink - dt);
+  if (p.mesh) {
+    p.mesh.position.set(p.x, 0, p.z);
+    p.mesh.rotation.y = p.rotation;
+  }
+
+  p.botThink = Math.max(0, (p.botThink || 0) - dt);
   p.lungeCooldown = Math.max(0, (p.lungeCooldown || 0) - dt);
   const dist = Math.hypot(S.ball.position.x - p.x, S.ball.position.z - p.z);
-  if (dist < 1.4 && p.lungeCooldown <= 0 && p.moving > .25) {
+  if (role.role === "chaser" && dist < 1.4 && p.lungeCooldown <= 0 && p.moving > .25) {
     p.lunge = .48;
     p.lungeSide = S.ball.position.x >= p.x ? 1 : -1;
     p.lungeStrength = THREE.MathUtils.clamp((dist - .35) / 1.1, .28, .85);
     p.lungeCooldown = .9;
   }
-  if (dist < 1.45 && p.botThink <= 0 && S.expectedBounceTeam !== p.team && S.cooldown <= 0) {
-    p.botThink = 1.1;
-    const choices = ["dink", "slice", "drive", "lob"];
-    const shot = choices[Math.floor(Math.random() * choices.length)];
-    performHit(shot, p.id, true);
+
+  const canContest = role.role === "chaser" && shouldBotContestBall({
+    player: p,
+    ball: { x: S.ball.position.x, z: S.ball.position.z },
+    velocity: { x: S.velocity.x, z: S.velocity.z },
+    expectedBounceTeam: S.expectedBounceTeam,
+    cooldown: S.cooldown
+  });
+  if (canContest && dist < 1.45 && p.botThink <= 0) {
+    p.botThink = .85;
+    const opponents = S.players.filter(player => player.team !== p.team)
+      .map(player => ({ x: player.x, z: player.z }));
+    const plan = chooseBotShot({
+      ball: { x: S.ball.position.x, y: S.ball.position.y, z: S.ball.position.z },
+      player: p,
+      opponents
+    });
+    performHit(plan.shot, p.id, true, plan.targetX);
   }
 }
 function simulateBall(dt) {
@@ -739,7 +762,7 @@ function paddleContactDistance(player) {
   const contactZ = player.z + forwardZ * .52 + rightZ * .24;
   return Math.hypot(S.ball.position.x - contactX, S.ball.position.y - 1.02, S.ball.position.z - contactZ);
 }
-function performHit(shot, playerId, fromBot) {
+function performHit(shot, playerId, fromBot, aimX = null) {
   if (S.phase !== "rally" || S.cooldown > 0) return;
   const p = S.players.find(x => x.id === playerId);
   if (!p || !S.ball) return;
@@ -766,7 +789,9 @@ function performHit(shot, playerId, fromBot) {
   }
   const spec = SHOTS[shot] || SHOTS.drive;
   const direction = p.team === 0 ? -1 : 1;
-  const targetX = THREE.MathUtils.clamp(-p.x * .55 + (Math.random() - .5) * 1.8, -2.5, 2.5);
+  const targetX = Number.isFinite(aimX)
+    ? THREE.MathUtils.clamp(aimX, -2.5, 2.5)
+    : THREE.MathUtils.clamp(-p.x * .55 + (Math.random() - .5) * 1.8, -2.5, 2.5);
   const lateral = (targetX - S.ball.position.x) * .45 + (shot === "slice" ? .45 : 0);
   S.velocity.set(lateral, spec.lift, direction * spec.speed);
   S.spin?.set(
