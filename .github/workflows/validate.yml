@@ -13,6 +13,7 @@ on:
       - feat/yolo-pickleball-motion-v9
       - feat/yolo-pickleball-network-v10
       - feat/yolo-pickleball-stats-v11
+      - feat/yolo-pickleball-mobile-v12
   pull_request:
     branches:
       - main
@@ -35,6 +36,7 @@ jobs:
           node --input-type=module --check < src/motion-profile.mjs
           node --input-type=module --check < src/room-state.mjs
           node --input-type=module --check < src/stats.mjs
+          node --input-type=module --check < src/performance-budget.mjs
       - name: Verify app entry points and import map
         run: |
           test -s index.html
@@ -49,6 +51,8 @@ jobs:
           test -s tests/room-state.test.mjs
           test -s src/stats.mjs
           test -s tests/stats.test.mjs
+          test -s src/performance-budget.mjs
+          test -s tests/performance-budget.test.mjs
           test -s THIRD_PARTY_NOTICES.md
           grep -q 'src/main.js' index.html
           grep -q 'avatar-rig.js' src/main.js
@@ -75,8 +79,13 @@ jobs:
           grep -q 'playerStats: S.playerStats' src/main.js
           grep -q 'careerMatches' index.html
           grep -q 'matchStatsContent' index.html
+          grep -q 'getRenderProfile' src/main.js
+          grep -q 'nextRenderQuality' src/main.js
+          grep -q 'pointerType !== "mouse"' src/main.js
+          grep -q 'touch-action:none' styles.css
           node --test tests/rules.test.mjs
           node --test tests/ai-strategy.test.mjs
           node --test tests/motion-profile.test.mjs
           node --test tests/room-state.test.mjs
           node --test tests/stats.test.mjs
+          node --test tests/performance-budget.test.mjs
