@@ -15,7 +15,7 @@ const S = {
   name: "YOLO PLAYER", color: "#c7f36b", mode: "training", code: "TRAINING",
   peer: null, conns: new Map(), host: false, networkReady: false,
   players: [], id: "local", keys: new Set(), joy: { x: 0, z: 0 },
-  score: [0, 0], servingTeam: 0, serverIndex: 1, serverNumber: 2, rally: 0;
+  score: [0, 0], servingTeam: 0, serverIndex: 1, serverNumber: 2, rally: 0,
   phase: "ready", expectedBounceTeam: null, twoBounceStep: 0, serveActive: false, sideBounces: [0, 0],
   lastHitTeam: 0, ball: null, velocity: null, shot: "drive", cooldown: 0,
   scene: null, camera: null, renderer: null, clock: new THREE.Clock(),
@@ -507,14 +507,16 @@ function awardPoint(winner, reason) {
   S.phase = "point";
   S.velocity.set(0, 0, 0);
   if (winner === S.servingTeam) {
+    // The same server keeps serving when their team wins the rally.
     S.score[winner] += 1;
-    const teammates = S.players.filter(p => p.team === winner);
-      } else {
+  } else {
     const servingPlayers = S.players.filter(p => p.team === S.servingTeam);
     if (S.serverNumber === 1 && servingPlayers.length > 1) {
+      // First server lost the rally: pass serve to the partner.
       S.serverNumber = 2;
       S.serverIndex = 1;
     } else {
+      // Second server lost (or only one player is present): side out.
       S.servingTeam = winner;
       S.serverNumber = 1;
       S.serverIndex = 0;
