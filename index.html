@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#07120f">
+  <meta name="description" content="YOLO Pickleball — sân chơi 3D, luyện kỹ thuật và kết nối bạn bè.">
+  <title>YOLO Pickleball — Play Your Game</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="YOLO Pickleball home">
+        <span class="brand-mark">YO<span>.</span></span>
+        <span class="brand-copy"><b>YOLO</b><small>PICKLEBALL CLUB</small></span>
+      </a>
+      <div class="topbar-right">
+        <span class="live-pill"><i></i><span id="networkLabel">SÂN ĐANG MỞ</span></span>
+        <button class="top-link" id="rulesButton" type="button">LUẬT CHƠI</button>
+        <button class="avatar-button" id="profileButton" type="button" aria-label="Chỉnh sửa tên người chơi">Y</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="screen home-screen" id="homeScreen">
+        <div class="hero">
+          <div class="hero-copy">
+            <div class="eyebrow"><span></span> YOUR COURT. YOUR CREW. YOUR GAME.</div>
+            <h1>PLAY<br><em>YOUR</em><br>GAME.</h1>
+            <p class="hero-description">Bước vào sân YOLO. Di chuyển, chọn cú đánh và kết nối cùng bạn bè trong những trận Pickleball 3D.</p>
+            <div class="hero-cta">
+              <button class="button button-lime button-large" id="createRoomButton" type="button">TẠO PHÒNG ONLINE <span>↗</span></button>
+              <button class="button button-outline button-large" id="trainingButton" type="button">VÀO SÂN TẬP <span>→</span></button>
+            </div>
+            <div class="hero-stats">
+              <div><b>04</b><span>NGƯỜI / SÂN</span></div>
+              <div><b>3D</b><span>GÓC NHÌN SÂN ĐẤU</span></div>
+              <div><b>01</b><span>SÂN YOLO</span></div>
+            </div>
+          </div>
+          <div class="hero-visual">
+            <div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div>
+            <div class="hero-court">
+              <div class="hero-court-lines"></div><div class="hero-net"></div><div class="hero-logo">YOLO</div>
+              <span class="hero-player player-a"></span><span class="hero-player player-b"></span>
+              <span class="hero-player player-c"></span><span class="hero-player player-d"></span>
+              <span class="hero-ball"></span>
+            </div>
+            <div class="visual-caption"><span>01 / 01</span><b>YOLO ARENA</b><span>PLAY WITH PURPOSE</span></div>
+          </div>
+        </div>
+
+        <div class="home-lower">
+          <div class="section-intro"><div><span class="eyebrow">CHỌN CÁCH CHƠI</span><h2>YOUR NEXT MOVE.</h2></div><span class="section-note">PICK YOUR EXPERIENCE ↘</span></div>
+          <div class="mode-grid">
+            <button class="mode-card" id="modeOnline" type="button"><span class="mode-icon">⌘</span><b>PRIVATE MATCH</b><small>Tạo phòng riêng và mời tối đa 3 người bạn.</small><span class="mode-arrow">↗</span></button>
+            <button class="mode-card" id="modeJoin" type="button"><span class="mode-icon">◎</span><b>JOIN A ROOM</b><small>Nhập mã phòng để vào sân cùng bạn bè.</small><span class="mode-arrow">↗</span></button>
+            <button class="mode-card" id="modePractice" type="button"><span class="mode-icon">⌁</span><b>TRAINING COURT</b><small>Luyện Dink, Slice, Lob, Volley, Drive và Smash.</small><span class="mode-arrow">↗</span></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen game-screen" id="gameScreen" hidden>
+        <div class="game-toolbar">
+          <button class="back-button" id="backHomeButton" type="button">← <span>TRANG CHỦ</span></button>
+          <div class="court-title"><span class="eyebrow">YOLO ARENA</span><b>COURT 01 <i>·</i> PICKLEBALL</b></div>
+          <div class="room-tools"><span class="room-code" id="roomCodeLabel">TRAINING</span><button class="icon-button" id="copyRoomButton" type="button" title="Sao chép mã phòng">▣</button></div>
+        </div>
+
+        <div class="game-layout">
+          <div class="game-stage-wrap">
+            <div class="score-hud">
+              <div class="score-team active-team"><small>TEAM YOLO</small><b id="scoreHome">00</b></div>
+              <div class="score-center"><span>RALLY</span><b id="rallyLabel">READY</b></div>
+              <div class="score-team"><small>OPPONENT</small><b id="scoreAway">00</b></div>
+            </div>
+            <div class="game-stage" id="gameStage">
+              <div class="loading-scene" id="loadingScene"><div class="loader-mark">YO.</div><b>ĐANG DỰNG SÂN YOLO</b><small>Khởi tạo sân đấu 3D...</small></div>
+              <div class="scene-hint" id="sceneHint">WASD / phím mũi tên để di chuyển</div>
+              <div class="touch-controls" id="touchControls">
+                <div class="joystick" id="joystick"><div class="joystick-ring"></div><div class="joystick-knob" id="joystickKnob"></div></div>
+                <div class="touch-actions">
+                  <button class="touch-shot touch-serve" data-action="serve" type="button">SERVE</button>
+                  <button class="touch-shot" data-shot="dink" type="button">DINK</button>
+                  <button class="touch-shot" data-shot="slice" type="button">SLICE</button>
+                  <button class="touch-shot" data-shot="lob" type="button">LOB</button>
+                  <button class="touch-shot" data-shot="volley" type="button">VOLLEY</button>
+                  <button class="touch-shot touch-drive" data-shot="drive" type="button">DRIVE</button>
+                  <button class="touch-shot" data-shot="smash" type="button">SMASH</button>
+                </div>
+              </div>
+            </div>
+            <div class="game-bottomline"><span id="gameStatus">SẴN SÀNG · Chọn SERVE để bắt đầu</span><span>YOLO PICKLEBALL CLUB <b>●</b></span></div>
+          </div>
+
+          <aside class="game-sidebar">
+            <div class="player-panel">
+              <div class="panel-heading"><span>PLAYER CARD</span><i>01 / 04</i></div>
+              <div class="player-identity"><div class="player-avatar" id="playerAvatar">Y</div><div><b id="playerDisplayName">YOLO PLAYER</b><small id="playerPosition">TEAM A · PLAYER 01</small></div></div>
+              <label class="input-label" for="jerseyInput">TÊN IN SAU LƯNG ÁO</label>
+              <input class="text-input" id="jerseyInput" maxlength="14" value="YOLO PLAYER" placeholder="Nhập tên của bạn">
+              <div class="color-picker"><span>MÀU ÁO</span><div>
+                <button class="color-dot selected" data-color="#c7f36b" style="--swatch:#c7f36b" aria-label="Xanh lime" type="button"></button>
+                <button class="color-dot" data-color="#6bc5e8" style="--swatch:#6bc5e8" aria-label="Xanh dương" type="button"></button>
+                <button class="color-dot" data-color="#f2a0a0" style="--swatch:#f2a0a0" aria-label="Hồng" type="button"></button>
+                <button class="color-dot" data-color="#f0eee4" style="--swatch:#f0eee4" aria-label="Trắng" type="button"></button>
+              </div></div>
+            </div>
+            <div class="shot-panel">
+              <div class="panel-heading"><span>SHOT SELECTION</span><i>SKILLS / 06</i></div>
+              <div class="shot-list">
+                <button class="shot-button" data-shot="dink" type="button"><span class="shot-key">1</span><span><b>DINK</b><small>Bóng mềm · gần lưới</small></span><i>↗</i></button>
+                <button class="shot-button" data-shot="slice" type="button"><span class="shot-key">2</span><span><b>SLICE</b><small>Cắt bóng · tạo xoáy</small></span><i>↗</i></button>
+                <button class="shot-button" data-shot="lob" type="button"><span class="shot-key">3</span><span><b>LOB</b><small>Bóng bổng · qua đầu</small></span><i>↗</i></button>
+                <button class="shot-button" data-shot="volley" type="button"><span class="shot-key">4</span><span><b>VOLLEY</b><small>Đánh bóng trên không</small></span><i>↗</i></button>
+                <button class="shot-button" data-shot="drive" type="button"><span class="shot-key">5</span><span><b>DRIVE</b><small>Bóng nhanh · đi sâu</small></span><i>↗</i></button>
+                <button class="shot-button" data-shot="smash" type="button"><span class="shot-key">6</span><span><b>SMASH</b><small>Đập bóng · kết thúc</small></span><i>↗</i></button>
+              </div>
+              <button class="button button-lime serve-button" id="serveButton" type="button">SERVE / GIAO BÓNG <span>↗</span></button>
+            </div>
+            <div class="room-panel"><div class="panel-heading"><span>PLAYERS IN COURT</span><i id="playerCount">01 / 04</i></div><div class="player-list" id="playerList"><div class="player-row"><span class="player-dot"></span><b id="sidebarPlayerName">YOLO PLAYER</b><small>YOU</small></div><div class="player-row waiting"><span class="player-dot"></span><b>Đang chờ người chơi</b><small>02</small></div><div class="player-row waiting"><span class="player-dot"></span><b>Đang chờ người chơi</b><small>03</small></div><div class="player-row waiting"><span class="player-dot"></span><b>Đang chờ người chơi</b><small>04</small></div></div></div>
+          </aside>
+        </div>
+        <div class="mobile-shotbar" id="mobileShotbar">
+          <button data-shot="dink" type="button">DINK</button><button data-shot="slice" type="button">SLICE</button><button data-shot="lob" type="button">LOB</button><button data-shot="volley" type="button">VOLLEY</button><button data-shot="drive" type="button">DRIVE</button><button data-shot="smash" type="button">SMASH</button>
+        </div>
+      </section>
+    </main>
+    <footer class="footer"><span>YOLO PICKLEBALL CLUB © 2026</span><span>PLAY FAIR. PLAY HARD. PLAY YOLO.</span></footer>
+  </div>
+
+  <div class="modal-backdrop" id="joinModal" hidden>
+    <div class="modal-card">
+      <button class="modal-close" id="closeJoinModal" type="button" aria-label="Đóng">×</button>
+      <span class="eyebrow">JOIN YOUR CREW</span><h2>VÀO SÂN YOLO.</h2><p>Nhập mã phòng do chủ phòng chia sẻ để tham gia trận đấu.</p>
+      <label class="input-label" for="joinCodeInput">MÃ PHÒNG</label><input class="text-input code-input" id="joinCodeInput" placeholder="DÁN MÃ PHÒNG TẠI ĐÂY" autocomplete="off">
+      <button class="button button-lime modal-submit" id="joinRoomButton" type="button">THAM GIA PHÒNG ↗</button>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="profileModal" hidden>
+    <div class="modal-card">
+      <button class="modal-close" id="closeProfileModal" type="button" aria-label="Đóng">×</button>
+      <span class="eyebrow">PLAYER PROFILE</span><h2>TÊN CỦA BẠN.</h2><p>Tên này sẽ xuất hiện trong danh sách người chơi và trên lưng áo nhân vật.</p>
+      <label class="input-label" for="profileNameInput">TÊN NGƯỜI CHƠI</label><input class="text-input" id="profileNameInput" maxlength="14" placeholder="Ví dụ: QUOC">
+      <button class="button button-lime modal-submit" id="saveProfileButton" type="button">LƯU THÔNG TIN ↗</button>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="rulesModal" hidden>
+    <div class="modal-card rules-card">
+      <button class="modal-close" id="closeRulesModal" type="button" aria-label="Đóng">×</button>
+      <span class="eyebrow">QUICK RULES</span><h2>LUẬT PICKLEBALL.</h2>
+      <ul>
+        <li><b>Serve:</b> Giao bóng chéo sân, bóng phải qua kitchen line và vào ô giao bóng đối diện.</li>
+        <li><b>Two-bounce rule:</b> Sau giao bóng, mỗi bên phải để bóng nảy một lần trước khi volley.</li>
+        <li><b>Kitchen:</b> Không volley khi đang đứng trong vùng non-volley zone.</li>
+        <li><b>Rally:</b> Bóng ra ngoài, chạm lưới không qua sân hoặc nảy hai lần sẽ kết thúc pha bóng.</li>
+        <li><b>Điểm:</b> Trận tiêu chuẩn thường đánh đến 11 điểm và phải hơn đối thủ ít nhất 2 điểm.</li>
+      </ul>
+      <p class="rules-note">Bản thử nghiệm hiện ưu tiên trải nghiệm điều khiển và mô phỏng pha bóng; luật thi đấu đầy đủ sẽ tiếp tục được hoàn thiện.</p>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
