@@ -30,6 +30,7 @@ import {
   buildMatchReport,
   updateCareerRecord
 } from "./stats.mjs";
+import { getRenderProfile, nextRenderQuality } from "./performance-budget.mjs";
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -58,7 +59,8 @@ const S = {
   inputSeq: 0, lastSnapshotSeq: 0, snapshotSeq: 0, lastPingAt: 0,
   lastHostMessageAt: 0, rtt: 0, netBallTarget: null,
   networkSession: 0, connectionLost: false,
-  hostPeerId: null, resumeToken: null, reconnectTimer: null, reconnectAttempts: 0
+  hostPeerId: null, resumeToken: null, reconnectTimer: null, reconnectAttempts: 0,
+  qualityLevel: 1, frameSamples: [], lastQualityCheck: 0, keyLight: null, isMobile: false
 };
 
 function toast(message) {
@@ -539,19 +541,34 @@ function initScene() {
   S.scene.background = new THREE.Color(0x14271c);
   S.scene.fog = new THREE.Fog(0x14271c, 20, 38);
   const compactScreen = window.matchMedia("(max-width: 700px)").matches;
+  S.isMobile = compactScreen;
+  S.qualityLevel = compactScreen ? 1 : 2;
+  const renderProfile = getRenderProfile(S.qualityLevel, compactScreen, window.devicePixelRatio || 1);
   S.camera = new THREE.PerspectiveCamera(compactScreen ? 48 : 43, stage.clientWidth / stage.clientHeight, .1, 100);
   S.camera.position.set(0, compactScreen ? 12.6 : 11, compactScreen ? 20.2 : 17.5);
   S.camera.lookAt(0, 0, 0);
-  S.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-  S.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, compactScreen ? 1.2 : 1.6));
+  S.renderer = new THREE.WebGLRenderer({
+    antialias: renderProfile.antialias,
+    powerPreference: "high-performance",
+    stencil: false,
+    preserveDrawingBuffer: false
+  });
+  S.renderer.setPixelRatio(renderProfile.pixelRatio);
   S.renderer.setSize(stage.clientWidth, stage.clientHeight);
-  S.renderer.shadowMap.enabled = true; S.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  S.renderer.shadowMap.enabled = renderProfile.shadows;
+  S.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   S.renderer.outputColorSpace = THREE.SRGBColorSpace;
   S.renderer.toneMapping = THREE.ACESFilmicToneMapping; S.renderer.toneMappingExposure = 1.1;
   stage.insertBefore(S.renderer.domElement, stage.querySelector(".scene-hint"));
   S.scene.add(new THREE.HemisphereLight(0xdcebd9, 0x233729, 2));
   const key = new THREE.DirectionalLight(0xfff1d8, 2.5);
-  key.position.set(-5, 12, 7); key.castShadow = true; key.shadow.mapSize.set(1024, 1024); S.scene.add(key);
+  key.position.set(-5, 12, 7);
+  key.castShadow = renderProfile.shadows;
+  key.shadow.mapSize.set(renderProfile.shadowMapSize, renderProfile.shadowMapSize);
+  S.keyLight = key;
+  S.scene.add(key);
+  S.lastQualityCheck = performance.now();
+  S.frameSamples = [];
   const fill = new THREE.DirectionalLight(0xb2d8c2, 1); fill.position.set(6, 7, -8); S.scene.add(fill);
   addCourt();
   S.ball = new THREE.Mesh(new THREE.SphereGeometry(.105, 20, 16),
@@ -572,7 +589,27 @@ function resizeRenderer() {
   const w = stage.clientWidth, h = stage.clientHeight; if (!w || !h) return;
   S.camera.aspect = w / h; S.camera.updateProjectionMatrix(); S.renderer.setSize(w, h, false);
 }
+function applyRenderQuality(level) {
+  if (!S.renderer) return;
+  const isMobile = window.matchMedia("(max-width: 700px)").matches;
+  const profile = getRenderProfile(level, isMobile, window.devicePixelRatio || 1);
+  S.qualityLevel = profile.level;
+  S.isMobile = isMobile;
+  S.renderer.setPixelRatio(profile.pixelRatio);
+  S.renderer.shadowMap.enabled = profile.shadows;
+  S.renderer.shadowMap.needsUpdate = true;
+  if (S.keyLight) {
+    S.keyLight.castShadow = profile.shadows;
+    S.keyLight.shadow.mapSize.set(profile.shadowMapSize, profile.shadowMapSize);
+    S.keyLight.shadow.needsUpdate = true;
+  }
+  resizeRenderer();
+}
 window.addEventListener("resize", resizeRenderer);
+window.addEventListener("orientationchange", () => {
+  resizeRenderer();
+  if (S.renderer) applyRenderQuality(S.qualityLevel);
+});
 function updateCamera(dt) {
   if (!S.camera) return;
   const local = S.players.find(player => player.id === S.id);
@@ -589,9 +626,23 @@ function updateCamera(dt) {
 function animate() {
   if (!S.renderer) return;
   requestAnimationFrame(animate);
-  const dt = Math.min(S.clock.getDelta(), .033);
+  const rawDt = S.clock.getDelta();
+  if (document.hidden) return;
+  const dt = Math.min(rawDt, .033);
   updateGame(dt);
   updateCamera(dt);
+  if (rawDt > .001) {
+    S.frameSamples.push(1 / rawDt);
+    if (S.frameSamples.length > 90) S.frameSamples.shift();
+  }
+  const now = performance.now();
+  if (now - S.lastQualityCheck > 2600 && S.frameSamples.length >= 30) {
+    const fps = S.frameSamples.reduce((sum, value) => sum + value, 0) / S.frameSamples.length;
+    const nextLevel = nextRenderQuality(S.qualityLevel, fps, S.isMobile);
+    if (nextLevel !== S.qualityLevel) applyRenderQuality(nextLevel);
+    S.frameSamples.length = 0;
+    S.lastQualityCheck = now;
+  }
   S.renderer.render(S.scene, S.camera);
 }
 function animatePlayer(p, dt, time) {
@@ -1104,10 +1155,11 @@ $$("[data-shot]").forEach(btn => btn.addEventListener("click", () => {
 $("#serveButton").onclick = startServe;
 $$("[data-action='serve']").forEach(btn => btn.onclick = startServe);
 $("#gameStage").addEventListener("pointerdown", e => {
-  if (e.target.closest("button") || e.target.closest(".joystick")) return;
+  if (e.pointerType !== "mouse" || e.target.closest("button") || e.target.closest(".joystick")) return;
   attemptShot(S.shot);
 });
 window.addEventListener("keydown", e => {
+  if (e.target?.closest?.("input, textarea, select, button") || e.target?.isContentEditable) return;
   const key = e.key.toLowerCase();
   if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) e.preventDefault();
   S.keys.add(key);
@@ -1132,8 +1184,16 @@ function moveJoystick(e) {
   knob.style.transform = "translate(" + x + "px," + y + "px)";
   S.joy.x = rawX * scale; S.joy.z = rawY * scale;
 }
-joystick.addEventListener("pointerdown", e => { joyPointer = e.pointerId; joystick.setPointerCapture(e.pointerId); moveJoystick(e); });
-joystick.addEventListener("pointermove", e => { if (joyPointer === e.pointerId) moveJoystick(e); });
+joystick.addEventListener("pointerdown", e => {
+  e.preventDefault(); e.stopPropagation();
+  if (joyPointer !== null) return;
+  joyPointer = e.pointerId;
+  joystick.setPointerCapture(e.pointerId);
+  moveJoystick(e);
+});
+joystick.addEventListener("pointermove", e => {
+  if (joyPointer === e.pointerId) { e.preventDefault(); moveJoystick(e); }
+});
 function resetJoystick(e) {
   if (joyPointer !== e.pointerId) return;
   joyPointer = null; knob.style.transform = ""; S.joy.x = 0; S.joy.z = 0;
@@ -1550,7 +1610,15 @@ $$(".color-dot").forEach(btn => btn.onclick = () => {
   const local = S.players.find(p => p.id === S.id); if (local) local.color = S.color;
   updatePlayerLabels();
 });
-document.addEventListener("visibilitychange", () => { if (document.hidden) S.keys.clear(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    S.keys.clear();
+    S.joy.x = 0; S.joy.z = 0;
+  } else {
+    S.clock.getDelta();
+    resizeRenderer();
+  }
+});
 loadSavedProfile();
 document.documentElement.style.setProperty("--shirt", S.color);
 $(".color-dot").forEach(btn => btn.classList.toggle("selected", btn.dataset.color === S.color));
