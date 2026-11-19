@@ -135,7 +135,7 @@ function positionForSlot(slot) {
 function createPlayer(slot, id, name, color) {
   return { id, name: cleanName(name), color: color || "#c7f36b", ...positionForSlot(slot),
     targetX: null, targetZ: null, targetRotation: null, mesh: null, rigged: false,
-    velocityX: 0, velocityZ: 0, moving: 0, swing: 0, swingType: "drive",
+    velocityX: 0, velocityZ: 0, moving: 0, swing: 0, swingType: "drive", swingSide: "forehand",
     splitStep: 0, lunge: 0, lungeSide: 1, lungeStrength: 1, lungeCooldown: 0,
     volleyFollowThrough: 0, bot: false, botThink: 0 };
 }
@@ -148,6 +148,7 @@ function mergePlayers(incoming, snap = false) {
         name: data.name, color: data.color, team: data.team, slot: data.slot,
         swing: data.swing ?? existing.swing ?? 0,
         swingType: data.swingType ?? existing.swingType ?? "drive",
+        swingSide: data.swingSide ?? existing.swingSide ?? "forehand",
         splitStep: data.splitStep ?? existing.splitStep ?? 0,
         lunge: data.lunge ?? existing.lunge ?? 0,
         lungeSide: data.lungeSide ?? existing.lungeSide ?? 1,
@@ -163,7 +164,8 @@ function mergePlayers(incoming, snap = false) {
     return { ...data, targetX: data.x, targetZ: data.z,
       targetRotation: data.rotation, mesh: null, rigged: false,
       velocityX: 0, velocityZ: 0, moving: 0, swing: data.swing || 0,
-      swingType: data.swingType || "drive", splitStep: data.splitStep || 0,
+      swingType: data.swingType || "drive", swingSide: data.swingSide || "forehand",
+      splitStep: data.splitStep || 0,
       lunge: data.lunge || 0, lungeSide: data.lungeSide || 1,
       lungeStrength: data.lungeStrength || 1, lungeCooldown: 0,
       volleyFollowThrough: data.volleyFollowThrough || 0 };
@@ -367,10 +369,11 @@ function initScene() {
   S.scene = new THREE.Scene();
   S.scene.background = new THREE.Color(0x14271c);
   S.scene.fog = new THREE.Fog(0x14271c, 20, 38);
-  S.camera = new THREE.PerspectiveCamera(43, stage.clientWidth / stage.clientHeight, .1, 100);
-  S.camera.position.set(0, 11, 17.5); S.camera.lookAt(0, 0, 0);
-  S.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
   const compactScreen = window.matchMedia("(max-width: 700px)").matches;
+  S.camera = new THREE.PerspectiveCamera(compactScreen ? 48 : 43, stage.clientWidth / stage.clientHeight, .1, 100);
+  S.camera.position.set(0, compactScreen ? 12.6 : 11, compactScreen ? 20.2 : 17.5);
+  S.camera.lookAt(0, 0, 0);
+  S.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
   S.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, compactScreen ? 1.2 : 1.6));
   S.renderer.setSize(stage.clientWidth, stage.clientHeight);
   S.renderer.shadowMap.enabled = true; S.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -401,11 +404,25 @@ function resizeRenderer() {
   S.camera.aspect = w / h; S.camera.updateProjectionMatrix(); S.renderer.setSize(w, h, false);
 }
 window.addEventListener("resize", resizeRenderer);
+function updateCamera(dt) {
+  if (!S.camera) return;
+  const local = S.players.find(player => player.id === S.id);
+  const side = local?.team === 1 ? -1 : 1;
+  const compactScreen = window.matchMedia("(max-width: 700px)").matches;
+  const targetX = (local?.x || 0) * .18;
+  const targetY = compactScreen ? 12.6 : 11;
+  const targetZ = side * (compactScreen ? 20.2 : 17.5);
+  S.camera.position.x = THREE.MathUtils.damp(S.camera.position.x, targetX, 2.6, dt);
+  S.camera.position.y = THREE.MathUtils.damp(S.camera.position.y, targetY, 2.6, dt);
+  S.camera.position.z = THREE.MathUtils.damp(S.camera.position.z, targetZ, 2.6, dt);
+  S.camera.lookAt((local?.x || 0) * .1, 0, 0);
+}
 function animate() {
   if (!S.renderer) return;
   requestAnimationFrame(animate);
   const dt = Math.min(S.clock.getDelta(), .033);
   updateGame(dt);
+  updateCamera(dt);
   S.renderer.render(S.scene, S.camera);
 }
 function animatePlayer(p, dt, time) {
@@ -806,6 +823,8 @@ function performHit(shot, playerId, fromBot, aimX = null) {
   S.sideBounces = [0, 0];
   S.cooldown = .22;
   p.swing = 1; p.swingType = shot;
+  const relativeBallSide = (S.ball.position.x - p.x) * (p.team === 0 ? 1 : -1);
+  p.swingSide = relativeBallSide < -.12 ? "backhand" : "forehand";
   p.lunge = bodyDistance > .95 ? .56 : .3;
   p.lungeSide = S.ball.position.x >= p.x ? 1 : -1;
   p.lungeStrength = THREE.MathUtils.clamp((bodyDistance - .55) / 1.45, .32, 1);
@@ -937,6 +956,7 @@ function serializePlayers() {
     rotation: Number.isFinite(p.rotation) ? p.rotation : 0,
     team: p.team, slot: p.slot,
     swing: p.swing || 0, swingType: p.swingType || "drive",
+    swingSide: p.swingSide || "forehand",
     splitStep: p.splitStep || 0, lunge: p.lunge || 0,
     lungeSide: p.lungeSide || 1, lungeStrength: p.lungeStrength || 1,
     volleyFollowThrough: p.volleyFollowThrough || 0

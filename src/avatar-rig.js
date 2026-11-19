@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
+import { getFootworkProfile, getStrokePhase } from "./motion-profile.mjs";
 
 // One detailed, rigged Rocketbox athlete model is fetched once and cloned with independent
 // skeletons for each player. The upstream asset is MIT-licensed; attribution is in THIRD_PARTY_NOTICES.md.
@@ -231,7 +232,8 @@ export function createRiggedAvatar(template, player) {
   Object.assign(q, {
     rigged: true, model, mixer, actions, bones, clothes, namePlate, paddle,
     morphMeshes, activeMove: "idle", baseY: model.position.y,
-    lastOverlay: new Map(), blinkNext: 2.5 + Math.random() * 2.5,
+    lastOverlay: new Map(), lastForwardSpeed: 0,
+    blinkNext: 2.5 + Math.random() * 2.5,
     blinkAt: -1, idlePhase: Math.random() * Math.PI * 2,
     lastColor: null
   });
@@ -329,16 +331,17 @@ export function animateRiggedAvatar(root, player, dt, time, ballPosition = null)
   for (const [bone, offset] of q.lastOverlay) bone.quaternion.multiply(offset.clone().invert());
   q.lastOverlay.clear();
 
-  const moving = clamp01(player.moving || 0);
   const vx = player.velocityX || 0;
   const vz = player.velocityZ || 0;
-  const speed = Math.hypot(vx, vz);
+  const footwork = getFootworkProfile({ velocityX: vx, velocityZ: vz, rotation: root.rotation.y });
+  const moving = footwork.moving;
+  const speed = footwork.speed;
   playLocomotion(q, moving);
   q.mixer.update(dt);
 
   const ready = 1 - smooth01(moving, .04, .42);
-  const forwardSpeed = -Math.sin(root.rotation.y) * vx - Math.cos(root.rotation.y) * vz;
-  const lateralSpeed = Math.cos(root.rotation.y) * vx + Math.sin(root.rotation.y) * vz;
+  const forwardSpeed = footwork.forwardSpeed;
+  const lateralSpeed = footwork.lateralSpeed;
 
   // Pickleball ready position: low centre of gravity, flexed knees and paddle held in front.
   boneOverlay(q, q.bones.hips, .035 * ready, 0, -.035 * lateralSpeed * .035);
@@ -356,11 +359,31 @@ export function animateRiggedAvatar(root, player, dt, time, ballPosition = null)
 
   // Natural acceleration, side-to-side weight transfer and running bounce.
   const lateralLean = THREE.MathUtils.clamp(lateralSpeed / 4.5, -1, 1);
+  const lateralSide = Math.sign(lateralSpeed) || 1;
+  const shuffle = footwork.lateralIntensity * moving;
+  const leadHip = lateralSide > 0 ? q.bones.rightUpLeg : q.bones.leftUpLeg;
+  const trailHip = lateralSide > 0 ? q.bones.leftUpLeg : q.bones.rightUpLeg;
+  const leadKnee = lateralSide > 0 ? q.bones.rightLeg : q.bones.leftLeg;
+  const trailKnee = lateralSide > 0 ? q.bones.leftLeg : q.bones.rightLeg;
+  const leadFoot = lateralSide > 0 ? q.bones.rightFoot : q.bones.leftFoot;
+  const forwardAcceleration = dt > .001 ? (forwardSpeed - (q.lastForwardSpeed || 0)) / dt : 0;
+  const braking = smooth01(-forwardAcceleration, 2, 13);
+  q.lastForwardSpeed = forwardSpeed;
+
   boneOverlay(q, q.bones.hips, 0, 0, -lateralLean * .075 * moving);
-  boneOverlay(q, q.bones.spine1, -.045 * moving, 0, lateralLean * .095 * moving);
+  boneOverlay(q, q.bones.spine1,
+    -.025 * footwork.forwardDrive + .055 * footwork.retreat + .035 * braking,
+    0, lateralLean * .095 * moving);
+  // A quick lateral shuffle bends the lead knee and pushes off the trailing leg.
+  boneOverlay(q, leadHip, -.13 * shuffle - .12 * footwork.crossover, 0, lateralSide * .075 * shuffle);
+  boneOverlay(q, trailHip, .075 * shuffle + .08 * footwork.crossover, 0, -lateralSide * .055 * shuffle);
+  boneOverlay(q, leadKnee, .2 * shuffle + .12 * footwork.crossover, 0, 0);
+  boneOverlay(q, trailKnee, -.075 * shuffle, 0, 0);
+  boneOverlay(q, leadFoot, .075 * shuffle, 0, lateralSide * .035 * shuffle);
   if (moving > .08) {
-    boneOverlay(q, q.bones.leftArm, .08 * Math.sin(time * 10 + q.idlePhase) * moving, 0, 0);
-    boneOverlay(q, q.bones.leftForeArm, -.08 * Math.sin(time * 10 + q.idlePhase) * moving, 0, 0);
+    const armCounter = Math.sin(time * (9 + speed) + q.idlePhase) * moving;
+    boneOverlay(q, q.bones.leftArm, .09 * armCounter - .08 * braking, 0, -.055 * lateralLean);
+    boneOverlay(q, q.bones.leftForeArm, -.07 * armCounter, 0, 0);
   }
 
   // Split step when the incoming ball crosses the net: a small hop, then land in a ready stance.
@@ -404,10 +427,9 @@ export function animateRiggedAvatar(root, player, dt, time, ballPosition = null)
   if ((player.swing || 0) > 0) {
     player.swing = Math.max(0, player.swing - dt * 1.72);
     const progress = 1 - player.swing;
-    const windup = Math.sin(clamp01(progress / .36) * Math.PI * .5);
-    const strike = Math.sin(clamp01((progress - .25) / .48) * Math.PI);
-    const follow = smooth01(progress, .48, .94);
+    const { windup, strike, followThrough: follow } = getStrokePhase(progress);
     const type = player.swingType || "drive";
+    const isBackhand = player.swingSide === "backhand";
     let backX = -.52, hitX = .92, finishX = .18;
     let backZ = .2, hitZ = .38, finishZ = -.18;
     let elbowBack = -.16, elbowHit = -.82, elbowFinish = -.2;
@@ -443,11 +465,14 @@ export function animateRiggedAvatar(root, player, dt, time, ballPosition = null)
     const armX = backX * (1 - windup) + hitX * strike + finishX * follow;
     const armZ = backZ * (1 - windup) + hitZ * strike + finishZ * follow;
     const elbowX = elbowBack * (1 - windup) + elbowHit * strike + elbowFinish * follow;
-    boneOverlay(q, q.bones.rightArm, armX, 0, armZ);
-    boneOverlay(q, q.bones.rightForeArm, elbowX, 0, wristHit * strike);
-    boneOverlay(q, q.bones.rightHand, 0, 0, wristHit * .42 * strike);
-    boneOverlay(q, q.bones.spine1, 0, torsoTurn * strike, .12 * strike);
-    boneOverlay(q, q.bones.hips, 0, -torsoTurn * .45 * strike, -weightShift * strike);
+    const strokeTurn = isBackhand ? -torsoTurn : torsoTurn;
+    boneOverlay(q, q.bones.rightArm, armX, isBackhand ? -.08 * strike : 0,
+      isBackhand ? -armZ * .72 : armZ);
+    boneOverlay(q, q.bones.rightForeArm, elbowX, 0, (isBackhand ? -1 : 1) * wristHit * strike);
+    boneOverlay(q, q.bones.rightHand, 0, 0, (isBackhand ? -1 : 1) * wristHit * .42 * strike);
+    boneOverlay(q, q.bones.leftArm, -.08 * strike, 0, isBackhand ? .13 * strike : -.06 * strike);
+    boneOverlay(q, q.bones.spine1, 0, strokeTurn * strike, .12 * strike);
+    boneOverlay(q, q.bones.hips, 0, -strokeTurn * .45 * strike, -weightShift * strike);
     boneOverlay(q, q.bones.leftUpLeg, .12 * strike, 0, 0);
     boneOverlay(q, q.bones.rightUpLeg, -.12 * strike, 0, 0);
     if (q.paddle) {
