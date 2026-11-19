@@ -16,6 +16,8 @@ Serve the repository root with any static web server (for example VS Code Live S
 - Local player profile remembers the jersey name and shirt colour on the same device.
 - Training mode with four local/demo players and basic bot movement/returns.
 - Experimental four-player PeerJS room creation/join by a four-digit code.
+- V6 multiplayer reliability layer: compact serializable player snapshots (no Three.js mesh objects), ordered snapshot/input sequence numbers, stale-packet rejection, smoothed remote-ball interpolation, heartbeat and round-trip latency display.
+- Validate player movement values and shot types on the host, restrict serve requests to the active server, time out incomplete joins, and report disconnected guests clearly.
 - Spin-aware ball flight with aerodynamic drag, Magnus curve, topspin/sidespin profiles per shot, energy loss on court bounce and ground rolling friction.
 - Paddle-centred contact window using the rendered paddle position, with height-aware reach checks; online snapshots synchronize ball spin.
 - Prototype serve sequence, two-bounce requirement, non-volley-zone volley fault and side-out-style scoring to 11, win by 2.
@@ -30,8 +32,8 @@ The Avatar Studio project identifies its character models and motion capture as 
 This is still a prototype, not a production multiplayer game or a certified rules engine.
 - The current human model is a single male base appearance shared by players, with different shirt colours and names. A proper avatar selector and a broader range of body types are future work.
 - Idle and walk use the source motion-capture clips. Pickleball ready stance, split-step, lunge, ball tracking and stroke phases are procedural skeletal animations, not sport-specific motion-capture. Dedicated pickleball mocap is still needed for competition-level realism.
-- PeerJS uses public signaling and direct peer connections. NAT/firewall restrictions can prevent some players from connecting; there is no TURN relay.
-- The host browser currently acts as the game authority. If the host closes the tab or loses connection, the room ends.
+- PeerJS uses public signaling and direct peer connections. V6 adds heartbeat/latency checks and clearer disconnect handling, but NAT/firewall restrictions can still prevent some players from connecting; there is no TURN relay.
+- The host browser currently acts as the game authority. Guests are notified when the host connection is lost, but there is no host migration or automatic rejoin; if the host closes the tab, the room ends.
 - No persistent user accounts, matchmaking, moderation, anti-cheat, robust reconnect, spectator mode or dedicated authoritative server is included.
 - Scoring and serve handling are simplified. Full official doubles service sequence, faults, let serves, kitchen momentum rules, line calls and tournament edge cases still require implementation and testing.
 - Physics is still an arcade approximation: spin, drag and bounce are implemented but not calibrated against measured ball data. Paddle contact uses a 3D proximity window around the paddle rather than a full rigid-body racket collision.
