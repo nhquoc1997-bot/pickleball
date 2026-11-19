@@ -1241,6 +1241,7 @@ function attachConnection(conn, isGuest) {
         }
         player = createPlayer(slot, conn.peer, "PLAYER", slot < 2 ? "#70c5e8" : "#ed9b9b");
         player.resumeToken = token || makeResumeToken();
+        player.statsKey = player.resumeToken;
         S.players.push(player);
       }
       joined = true;
@@ -1250,6 +1251,7 @@ function attachConnection(conn, isGuest) {
         ? message.color : player.color || "#70c5e8";
       player.connected = true;
       player.disconnectUntil = 0;
+      ensurePlayerStats(player);
       sendWelcome(conn);
       updateMeshes(); syncScore(); broadcastSnapshot();
     } else if (message.type === "input" && S.host) {
@@ -1414,6 +1416,7 @@ function startTraining() {
     { ...createPlayer(2, "bot2", "YOLO BOT", "#70c5e8"), bot: true },
     { ...createPlayer(3, "bot3", "RIVAL 02", "#ed9b9b"), bot: true }
   ];
+  resetMatchStats();
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.rally = 0;
   S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.serveActive = false; S.sideBounces = [0, 0];
   S.ballBouncedSinceHit = false; S.serveNetContact = false; S.matchWinner = null;
@@ -1430,6 +1433,7 @@ function createRoom() {
   S.snapshotSeq = 0; S.code = String(Math.floor(1000 + Math.random() * 9000));
   S.id = "host";
   S.players = [createPlayer(0, S.id, S.name, S.color)];
+  resetMatchStats();
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.rally = 0;
   S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.serveActive = false; S.sideBounces = [0, 0];
   S.ballBouncedSinceHit = false; S.serveNetContact = false; S.matchWinner = null;
@@ -1474,6 +1478,7 @@ function joinRoom() {
   S.reconnectAttempts = 0;
   saveRoomResume();
   S.players = [createPlayer(0, S.id, S.name, S.color)];
+  resetMatchStats();
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.phase = "ready"; S.twoBounceStep = 0; S.serveActive = false;
   S.ballBouncedSinceHit = false; S.serveNetContact = false; S.matchWinner = null;
   $("#roomCodeLabel").textContent = "YOLO-" + code;
