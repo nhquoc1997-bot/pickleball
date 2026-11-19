@@ -177,6 +177,80 @@ function reconnectRoom() {
     scheduleReconnect();
   }
 }
+function ensurePlayerStats(player) {
+  if (!player) return null;
+  const key = player.statsKey || player.id;
+  player.statsKey = key;
+  if (!S.playerStats[key]) S.playerStats[key] = createEmptyPlayerStats();
+  return key;
+}
+function resetMatchStats() {
+  S.playerStats = {};
+  S.matchReport = null;
+  S.careerSavedForMatch = false;
+  S.lastHitPlayerId = null;
+  for (const player of S.players) ensurePlayerStats(player);
+}
+function readCareerStats() {
+  try { return JSON.parse(localStorage.getItem("yolo-pickleball-career") || "null") || {}; }
+  catch { return {}; }
+}
+function renderCareerStats() {
+  const career = readCareerStats();
+  const matches = career.matches || 0;
+  $("#careerMatches").textContent = String(matches);
+  $("#careerWins").textContent = String(career.wins || 0);
+  $("#careerWinRate").textContent = matches
+    ? Math.round((career.wins || 0) / matches * 100) + "%"
+    : "—";
+  const recent = career.recentMatches?.[0];
+  $("#careerRecent").textContent = recent
+    ? (recent.result + " · " + recent.score.join("–") + " · " + new Date(recent.playedAt).toLocaleDateString())
+    : "CHƯA CÓ TRẬN ĐẤU";
+}
+function saveCareerStats() {
+  if (S.careerSavedForMatch || !S.matchReport) return;
+  const local = S.players.find(player => player.id === S.id);
+  if (!local) return;
+  const updated = updateCareerRecord(readCareerStats(), S.matchReport, local.statsKey || local.id);
+  try {
+    localStorage.setItem("yolo-pickleball-career", JSON.stringify(updated));
+    S.careerSavedForMatch = true;
+    renderCareerStats();
+  } catch (error) {
+    console.warn("Could not save YOLO career stats", error);
+  }
+}
+function renderMatchStats() {
+  const target = $("#matchStatsContent");
+  if (!target) return;
+  target.replaceChildren();
+  const report = S.matchReport || buildMatchReport(
+    S.players, S.playerStats, S.score, S.matchWinner ?? S.servingTeam, Date.now()
+  );
+  const heading = document.createElement("div");
+  heading.className = "match-report-score";
+  heading.textContent = report.score.join(" – ") + (S.phase === "finished" ? " · FINAL" : " · LIVE");
+  target.append(heading);
+  for (const player of report.players) {
+    const row = document.createElement("div");
+    row.className = "match-stat-row";
+    const identity = document.createElement("div");
+    identity.className = "match-stat-identity";
+    const name = document.createElement("b");
+    name.textContent = player.name;
+    const team = document.createElement("small");
+    team.textContent = (player.team === 0 ? "TEAM YOLO" : "OPPONENT") + " · PLAYER " + (player.slot + 1);
+    identity.append(name, team);
+    const stats = document.createElement("div");
+    stats.className = "match-stat-values";
+    const shots = Object.values(player.stats.shots || {}).reduce((sum, value) => sum + value, 0);
+    stats.textContent = shots + " SHOTS  ·  " + player.stats.winners + " WINNERS  ·  "
+      + player.stats.errors + " ERRORS  ·  " + player.stats.serves + " SERVES";
+    row.append(identity, stats);
+    target.append(row);
+  }
+}
 function setName(value) {
   S.name = cleanName(value);
   saveProfile();
