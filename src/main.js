@@ -1097,7 +1097,8 @@ function attachConnection(conn, isGuest) {
     if (session !== S.networkSession || !message || !message.type) return;
     if (isGuest) S.lastHostMessageAt = performance.now();
     if (message.type === "join" && S.host) {
-      const token = typeof message.resumeToken === "string" ? message.resumeToken : "";
+      const token = typeof message.resumeToken === "string" && /^[a-f0-9]{32}$/i.test(message.resumeToken)
+        ? message.resumeToken : "";
       const duplicate = token
         ? S.players.find(p => p.resumeToken === token && p.connected !== false)
         : null;
@@ -1121,7 +1122,7 @@ function attachConnection(conn, isGuest) {
           return;
         }
         player = createPlayer(slot, conn.peer, "PLAYER", slot < 2 ? "#70c5e8" : "#ed9b9b");
-        player.resumeToken = makeResumeToken();
+        player.resumeToken = token || makeResumeToken();
         S.players.push(player);
       }
       joined = true;
@@ -1342,9 +1343,10 @@ function joinRoom() {
   S.inputSeq = 0; S.lastSnapshotSeq = 0; S.lastPingAt = 0; S.rtt = 0;
   S.code = code; S.id = "joining"; S.netBallTarget = null;
   const savedRoom = loadRoomResume(code);
-  S.resumeToken = savedRoom?.token || null;
+  S.resumeToken = savedRoom?.token || makeResumeToken();
   S.hostPeerId = savedRoom?.hostPeerId || "yolo-pb-" + code;
   S.reconnectAttempts = 0;
+  saveRoomResume();
   S.players = [createPlayer(0, S.id, S.name, S.color)];
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.phase = "ready"; S.twoBounceStep = 0; S.serveActive = false;
   S.ballBouncedSinceHit = false; S.serveNetContact = false; S.matchWinner = null;
@@ -1365,8 +1367,8 @@ function joinRoom() {
     console.warn(error);
     S.networkReady = false;
     S.connectionLost = true;
-    $("#gameStatus").textContent = "Không tìm thấy phòng hoặc máy chủ đang bận. Có thể thử kết nối lại.";
-    $("#reconnectButton").hidden = false;
+    $("#gameStatus").textContent = "Không tìm thấy phòng hoặc máy chủ đang bận. YOLO sẽ thử kết nối lại.";
+    scheduleReconnect();
     toast("Không thể kết nối phòng.");
   });
 }
