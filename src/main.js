@@ -102,6 +102,62 @@ function saveProfile() {
   try { localStorage.setItem("yolo-pickleball-profile", JSON.stringify({ name: S.name, color: S.color })); }
   catch {}
 }
+function makeResumeToken() {
+  const bytes = new Uint8Array(16);
+  if (window.crypto?.getRandomValues) window.crypto.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return [...bytes].map(value => value.toString(16).padStart(2, "0")).join("");
+}
+function saveRoomResume() {
+  if (!S.code || !S.resumeToken) return;
+  try {
+    localStorage.setItem("yolo-pickleball-room-resume", JSON.stringify({
+      code: S.code, hostPeerId: S.hostPeerId, token: S.resumeToken
+    }));
+  } catch {}
+}
+function loadRoomResume(code) {
+  try {
+    const saved = JSON.parse(localStorage.getItem("yolo-pickleball-room-resume") || "null");
+    return saved?.code === code && typeof saved.token === "string" ? saved : null;
+  } catch { return null; }
+}
+function clearRoomResume() {
+  try { localStorage.removeItem("yolo-pickleball-room-resume"); } catch {}
+}
+function scheduleReconnect() {
+  if (S.host || S.mode !== "online" || !S.peer || !S.hostPeerId || S.networkReady) return;
+  if (S.reconnectAttempts >= 5) {
+    $("#reconnectButton").hidden = false;
+    $("#networkLabel").textContent = "CẦN KẾT NỐI LẠI";
+    $("#gameStatus").textContent = "Chưa thể kết nối lại. Nhấn KẾT NỐI LẠI để thử tiếp.";
+    return;
+  }
+  const delays = [900, 1600, 2800, 4500, 7000];
+  const delay = delays[S.reconnectAttempts++];
+  clearTimeout(S.reconnectTimer);
+  S.reconnectTimer = setTimeout(() => {
+    if (S.networkReady || !S.connectionLost || !S.peer || !S.hostPeerId) return;
+    const conn = S.peer.connect(S.hostPeerId, { reliable: true });
+    attachConnection(conn, true);
+  }, delay);
+}
+function reconnectRoom() {
+  if (S.mode !== "online" || S.host) return;
+  if (!S.peer || !S.hostPeerId) {
+    toast("Hãy quay về sảnh và tham gia lại bằng mã phòng cũ.");
+    return;
+  }
+  clearTimeout(S.reconnectTimer);
+  S.reconnectTimer = null;
+  S.reconnectAttempts = 0;
+  S.connectionLost = true;
+  $("#reconnectButton").hidden = true;
+  $("#networkLabel").textContent = "ĐANG KẾT NỐI LẠI";
+  $("#gameStatus").textContent = "Đang khôi phục vị trí và trạng thái trận đấu...";
+  const conn = S.peer.connect(S.hostPeerId, { reliable: true });
+  attachConnection(conn, true);
+}
 function setName(value) {
   S.name = cleanName(value);
   saveProfile();
@@ -1168,7 +1224,7 @@ function attachConnection(conn, isGuest) {
   conn.on("close", () => {
     if (session !== S.networkSession) return;
     clearTimeout(handshakeTimer);
-    S.conns.delete(conn.peer);
+    if (S.conns.get(conn.peer) === conn) S.conns.delete(conn.peer);
     if (S.host) {
       const player = S.players.find(p => p.id === conn.peer);
       if (player && player.slot !== 0 && joined) {
@@ -1238,6 +1294,7 @@ function startTraining() {
 function createRoom() {
   leaveNetwork();
   S.mode = "online"; S.host = true; S.networkReady = false; S.connectionLost = false;
+  clearRoomResume(); S.resumeToken = null; S.hostPeerId = null;
   S.snapshotSeq = 0; S.code = String(Math.floor(1000 + Math.random() * 9000));
   S.id = "host";
   S.players = [createPlayer(0, S.id, S.name, S.color)];
@@ -1260,12 +1317,11 @@ function createRoom() {
     toast("Đã tạo phòng YOLO-" + S.code);
   });
   S.peer.on("connection", conn => {
-    if (S.players.length >= 4) {
-      conn.on("open", () => conn.send({ type: "full" }));
+    const connected = S.players.filter(player => player.connected !== false).length;
+    if (connected >= 4) {
+      conn.on("open", () => conn.send({ type: "full", reason: "Phòng đã đủ 4 người." }));
       setTimeout(() => conn.close(), 500); return;
     }
-    const slot = [0, 1, 2, 3].find(i => !S.players.some(p => p.slot === i));
-    S.players.push(createPlayer(slot, conn.peer, "PLAYER", slot < 2 ? "#70c5e8" : "#ed9b9b"));
     attachConnection(conn, false);
   });
   S.peer.on("error", error => {
@@ -1280,6 +1336,10 @@ function joinRoom() {
   S.mode = "online"; S.host = false; S.networkReady = false; S.connectionLost = false;
   S.inputSeq = 0; S.lastSnapshotSeq = 0; S.lastPingAt = 0; S.rtt = 0;
   S.code = code; S.id = "joining"; S.netBallTarget = null;
+  const savedRoom = loadRoomResume(code);
+  S.resumeToken = savedRoom?.token || null;
+  S.hostPeerId = savedRoom?.hostPeerId || "yolo-pb-" + code;
+  S.reconnectAttempts = 0;
   S.players = [createPlayer(0, S.id, S.name, S.color)];
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.phase = "ready"; S.twoBounceStep = 0; S.serveActive = false;
   S.ballBouncedSinceHit = false; S.serveNetContact = false; S.matchWinner = null;
@@ -1315,6 +1375,7 @@ $("#joinCodeInput").addEventListener("keydown", e => { if (e.key === "Enter") jo
 $("#modeOnline").onclick = $("#createRoomButton").onclick = createRoom;
 $("#modePractice").onclick = $("#trainingButton").onclick = startTraining;
 $("#backHomeButton").onclick = () => { leaveNetwork(); showScreen(false); };
+$("#reconnectButton").onclick = reconnectRoom;
 $("#copyRoomButton").onclick = async () => {
   try { await navigator.clipboard.writeText("YOLO-" + S.code); toast("Đã sao chép mã YOLO-" + S.code); }
   catch { toast("Mã phòng: YOLO-" + S.code); }
