@@ -5,6 +5,7 @@ on:
       - main
       - feat/yolo-gameplay-v2
       - feat/yolo-rigged-athletes-v3
+      - feat/yolo-pickleball-motion-v4
   pull_request:
     branches:
       - main
