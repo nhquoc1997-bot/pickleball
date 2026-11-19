@@ -314,7 +314,8 @@ function initScene() {
   S.camera = new THREE.PerspectiveCamera(43, stage.clientWidth / stage.clientHeight, .1, 100);
   S.camera.position.set(0, 11, 17.5); S.camera.lookAt(0, 0, 0);
   S.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-  S.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
+  const compactScreen = window.matchMedia("(max-width: 700px)").matches;
+  S.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, compactScreen ? 1.2 : 1.6));
   S.renderer.setSize(stage.clientWidth, stage.clientHeight);
   S.renderer.shadowMap.enabled = true; S.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   S.renderer.outputColorSpace = THREE.SRGBColorSpace;
