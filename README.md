@@ -12,10 +12,12 @@ Serve the repository root with any static web server (for example VS Code Live S
 - T-shirt and dark trouser sport outfit tinting, a paddle attached to the right hand, and each player's chosen name printed on the back.
 - Motion-captured idle/walk clips blended with a pickleball ready stance, split-step on incoming net crossings, lateral lunge/recovery, ball tracking with head/eyes, and staged Dink, Slice, Lob, Volley, Drive and Smash stroke animations.
 - Predictive bot interception and smoother acceleration/deceleration; online snapshots synchronize swing, split-step and lunge cues so all four players see the same actions.
-- Smooth acceleration/deceleration for player movement, keyboard controls and mobile virtual joystick / touch shot controls.
+- Smooth acceleration/deceleration for player movement, keyboard controls and a larger mobile analog joystick with deadzone filtering, safe-area spacing and thumb-friendly shot buttons.
+- Local player profile remembers the jersey name and shirt colour on the same device.
 - Training mode with four local/demo players and basic bot movement/returns.
 - Experimental four-player PeerJS room creation/join by a four-digit code.
-- Basic ball gravity, bounce, court boundary and net collision handling.
+- Spin-aware ball flight with aerodynamic drag, Magnus curve, topspin/sidespin profiles per shot, energy loss on court bounce and ground rolling friction.
+- Paddle-centred contact window using the rendered paddle position, with height-aware reach checks; online snapshots synchronize ball spin.
 - Prototype serve sequence, two-bounce requirement, non-volley-zone volley fault and side-out-style scoring to 11, win by 2.
 - Loading progress and automatic fallback to the procedural avatar if the external GLB cannot be reached.
 
@@ -32,7 +34,7 @@ This is still a prototype, not a production multiplayer game or a certified rule
 - The host browser currently acts as the game authority. If the host closes the tab or loses connection, the room ends.
 - No persistent user accounts, matchmaking, moderation, anti-cheat, robust reconnect, spectator mode or dedicated authoritative server is included.
 - Scoring and serve handling are simplified. Full official doubles service sequence, faults, let serves, kitchen momentum rules, line calls and tournament edge cases still require implementation and testing.
-- Physics is an arcade approximation; it does not yet model paddle contact, spin, aerodynamic drag or calibrated ball/racket collision.
+- Physics is still an arcade approximation: spin, drag and bounce are implemented but not calibrated against measured ball data. Paddle contact uses a 3D proximity window around the paddle rather than a full rigid-body racket collision.
 
 For public launch, move to an authoritative WebSocket server (e.g. Colyseus), add TURN relay, server-side physics and validated rules, room lifecycle/reconnect handling, authentication, monitoring and load testing. For the next animation milestone, replace the procedural swing overlays with pickleball-specific motion-capture clips retargeted to this rig.
 
