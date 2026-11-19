@@ -42,7 +42,6 @@ export function assignDoublesRoles(players, team, ball, velocity) {
     const distance = Math.hypot(player.x - intercept.x, player.z - intercept.z);
     return !best || distance < best.distance ? { id: player.id, distance } : best;
   }, null);
-  const side = signForTeam(team);
   const ballX = clamp(ball?.x || 0, -2.2, 2.2);
   const supportX = ballX >= 0 ? -1.45 : 1.45;
   const supportZ = side * (Math.abs(ball?.z || 0) > 4.4 ? 3.85 : 2.58);
