@@ -859,7 +859,6 @@ function broadcastSnapshot() {
     seq: ++S.snapshotSeq,
     serverTime: Date.now(),
     players: serializePlayers(),
-    /*PLAYER_SNAPSHOT_BLOCK_REMOVED*/
     score: [...S.score], servingTeam: S.servingTeam, serverIndex: S.serverIndex, serverNumber: S.serverNumber,
     rally: S.rally, phase: S.phase, expectedBounceTeam: S.expectedBounceTeam,
     twoBounceStep: S.twoBounceStep, serveActive: S.serveActive, sideBounces: S.sideBounces,
