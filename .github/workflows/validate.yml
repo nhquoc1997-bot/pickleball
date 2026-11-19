@@ -9,6 +9,7 @@ on:
       - feat/yolo-pickleball-gameplay-v5
       - feat/yolo-pickleball-network-v6
       - feat/yolo-pickleball-rules-v7
+      - feat/yolo-pickleball-ai-v8
   pull_request:
     branches:
       - main
@@ -27,6 +28,7 @@ jobs:
           node --input-type=module --check < src/main.js
           node --input-type=module --check < src/avatar-rig.js
           node --input-type=module --check < src/rules.mjs
+          node --input-type=module --check < src/ai-strategy.mjs
       - name: Verify app entry points and import map
         run: |
           test -s index.html
@@ -35,6 +37,7 @@ jobs:
           test -s src/avatar-rig.js
           test -s src/rules.mjs
           test -s tests/rules.test.mjs
+          test -s tests/ai-strategy.test.mjs
           test -s THIRD_PARTY_NOTICES.md
           grep -q 'src/main.js' index.html
           grep -q 'avatar-rig.js' src/main.js
@@ -48,4 +51,8 @@ jobs:
           grep -q 'nextServeState' src/main.js
           grep -q 'ballBouncedSinceHit' src/main.js
           grep -q 'scoreCallLabel' index.html
+          grep -q 'assignDoublesRoles' src/main.js
+          grep -q 'chooseBotShot' src/main.js
+          grep -q 'shouldBotContestBall' src/main.js
           node --test tests/rules.test.mjs
+          node --test tests/ai-strategy.test.mjs
