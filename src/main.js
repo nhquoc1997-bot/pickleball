@@ -1159,7 +1159,7 @@ $("#gameStage").addEventListener("pointerdown", e => {
   attemptShot(S.shot);
 });
 window.addEventListener("keydown", e => {
-  if (e.target?.closest?.("input, textarea, select, button") || e.target?.isContentEditable) return;
+  if (e.target?.closest?.("input, textarea, select") || e.target?.isContentEditable) return;
   const key = e.key.toLowerCase();
   if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) e.preventDefault();
   S.keys.add(key);
@@ -1614,6 +1614,11 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     S.keys.clear();
     S.joy.x = 0; S.joy.z = 0;
+    if (joyPointer !== null) {
+      try { joystick.releasePointerCapture(joyPointer); } catch {}
+      joyPointer = null;
+    }
+    knob.style.transform = "";
   } else {
     S.clock.getDelta();
     resizeRenderer();
