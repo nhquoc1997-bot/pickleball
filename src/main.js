@@ -914,7 +914,7 @@ function sendWelcome(conn) {
   conn.send({
     type: "welcome", players: serializePlayers(), score: [...S.score],
     servingTeam: S.servingTeam, serverIndex: S.serverIndex,
-    serverNumber: S.serverNumber, hostId: S.id
+    serverNumber: S.serverNumber, matchWinner: S.matchWinner, hostId: S.id
   });
 }
 function broadcastSnapshot() {
@@ -925,7 +925,7 @@ function broadcastSnapshot() {
     serverTime: Date.now(),
     players: serializePlayers(),
     score: [...S.score], servingTeam: S.servingTeam, serverIndex: S.serverIndex, serverNumber: S.serverNumber,
-    rally: S.rally, phase: S.phase, expectedBounceTeam: S.expectedBounceTeam,
+    matchWinner: S.matchWinner, rally: S.rally, phase: S.phase, expectedBounceTeam: S.expectedBounceTeam,
     twoBounceStep: S.twoBounceStep, serveActive: S.serveActive, sideBounces: S.sideBounces,
     ball: S.ball ? { x: S.ball.position.x, y: S.ball.position.y, z: S.ball.position.z,
       vx: S.velocity.x, vy: S.velocity.y, vz: S.velocity.z,
@@ -979,7 +979,7 @@ function attachConnection(conn, isGuest) {
           ? message.color : "#70c5e8";
       }
       sendWelcome(conn);
-      updateMeshes(); broadcastSnapshot();
+      updateMeshes(); syncScore(); broadcastSnapshot();
     } else if (message.type === "input" && S.host) {
       const player = S.players.find(p => p.id === conn.peer);
       if (player && Number.isFinite(message.x) && Number.isFinite(message.z)) {
@@ -1019,6 +1019,7 @@ function attachConnection(conn, isGuest) {
       S.servingTeam = message.servingTeam ?? 0;
       S.serverIndex = message.serverIndex ?? 0;
       S.serverNumber = message.serverNumber ?? 1;
+      S.matchWinner = message.matchWinner ?? null;
       $("#networkLabel").textContent = "PHÒNG ONLINE · ĐÃ KẾT NỐI";
       $("#gameStatus").textContent = "ĐÃ KẾT NỐI · ĐANG ĐỒNG BỘ TRẬN ĐẤU";
       syncScore(); updateMeshes();
@@ -1033,6 +1034,7 @@ function attachConnection(conn, isGuest) {
       S.servingTeam = message.servingTeam ?? S.servingTeam;
       S.serverIndex = message.serverIndex ?? S.serverIndex;
       S.serverNumber = message.serverNumber ?? S.serverNumber;
+      S.matchWinner = message.matchWinner ?? S.matchWinner;
       S.rally = message.rally ?? S.rally;
       S.phase = message.phase || S.phase;
       S.expectedBounceTeam = message.expectedBounceTeam;
@@ -1099,7 +1101,6 @@ function startTraining() {
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.rally = 0;
   S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.serveActive = false; S.sideBounces = [0, 0];
   S.ballBouncedSinceHit = false; S.serveNetContact = false; S.matchWinner = null;
-  S.ballBouncedSinceHit = false; S.serveNetContact = false; S.matchWinner = null;
   $("#networkLabel").textContent = "CHẾ ĐỘ LUYỆN TẬP";
   syncScore(); $("#roomCodeLabel").textContent = "TRAINING";
   $("#networkLabel").textContent = "CHẾ ĐỘ LUYỆN TẬP";
@@ -1114,6 +1115,7 @@ function createRoom() {
   S.players = [createPlayer(0, S.id, S.name, S.color)];
   S.score = [0, 0]; S.servingTeam = 0; S.serverIndex = 1; S.serverNumber = 2; S.rally = 0;
   S.phase = "ready"; S.expectedBounceTeam = null; S.twoBounceStep = 0; S.serveActive = false; S.sideBounces = [0, 0];
+  S.ballBouncedSinceHit = false; S.serveNetContact = false; S.matchWinner = null;
   syncScore(); $("#roomCodeLabel").textContent = "YOLO-" + S.code;
   $("#networkLabel").textContent = "ĐANG TẠO PHÒNG";
   $("#gameStatus").textContent = "Đang kết nối dịch vụ phòng...";
