@@ -101,9 +101,10 @@ export function chooseBotShot({ ball, player, opponents = [] }) {
   };
 }
 
-export function shouldBotContestBall({ player, ball, velocity, expectedBounceTeam, cooldown = 0 }) {
+export function shouldBotContestBall({ player, ball, expectedBounceTeam, cooldown = 0 }) {
   if (!player || !ball || cooldown > 0 || expectedBounceTeam === player.team) return false;
+  const onOwnSide = player.team === 0 ? ball.z >= 0 : ball.z < 0;
+  if (!onOwnSide) return false;
   const distance = Math.hypot((ball.x || 0) - player.x, (ball.z || 0) - player.z);
-  const approach = (velocity?.z || 0) * signForTeam(player.team) < 0.25;
-  return distance <= 1.5 && (approach || Math.abs(velocity?.z || 0) < 2.5);
+  return distance <= 1.5;
 }
