@@ -14,7 +14,7 @@ const OUTFIT_PARTS = new Set([
   "Top_shirt", "Skin_shirt", "Top_tee", "Skin_tee", "Trousers", "Shoes"
 ]);
 const SPORT_OUTFIT = new Set(["Top_tee", "Skin_tee", "Trousers", "Shoes"]);
-const NOT_CLOTHES = /^(Body|Skin|Shoes|Trousers|Eyes|Eyebrows|Eyelashes|Teeth|Tongue|Hair)/;
+const NOT_CLOTHES = /^(Body|Skin|Eyes|Eyebrows|Eyelashes|Teeth|Tongue|Hair)/;
 
 function meshLabel(object) {
   return object.name && !/^mesh_\d|_\d+$/.test(object.name)
