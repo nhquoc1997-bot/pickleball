@@ -264,7 +264,6 @@ function setName(value) {
   if (local) local.name = S.name;
   updatePlayerLabels();
   syncPlayerUI();
-renderCareerStats();
   syncScore();
 }
 function syncPlayerUI() {
@@ -1546,3 +1545,4 @@ document.documentElement.style.setProperty("--shirt", S.color);
 $(".color-dot").forEach(btn => btn.classList.toggle("selected", btn.dataset.color === S.color));
 setName(S.name);
 syncPlayerUI();
+renderCareerStats();
