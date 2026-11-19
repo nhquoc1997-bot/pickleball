@@ -14,6 +14,7 @@ on:
       - feat/yolo-pickleball-network-v10
       - feat/yolo-pickleball-stats-v11
       - feat/yolo-pickleball-mobile-v12
+      - feat/yolo-pickleball-simulation-v13
   pull_request:
     branches:
       - main
@@ -37,6 +38,7 @@ jobs:
           node --input-type=module --check < src/room-state.mjs
           node --input-type=module --check < src/stats.mjs
           node --input-type=module --check < src/performance-budget.mjs
+          node --input-type=module --check < src/simulation-clock.mjs
       - name: Verify app entry points and import map
         run: |
           test -s index.html
@@ -53,6 +55,8 @@ jobs:
           test -s tests/stats.test.mjs
           test -s src/performance-budget.mjs
           test -s tests/performance-budget.test.mjs
+          test -s src/simulation-clock.mjs
+          test -s tests/simulation-clock.test.mjs
           test -s THIRD_PARTY_NOTICES.md
           grep -q 'src/main.js' index.html
           grep -q 'avatar-rig.js' src/main.js
@@ -83,9 +87,13 @@ jobs:
           grep -q 'nextRenderQuality' src/main.js
           grep -q 'pointerType !== "mouse"' src/main.js
           grep -q 'touch-action:none' styles.css
+          grep -q 'advanceFixedSteps' src/main.js
+          grep -q 'limitPlayerInput' src/main.js
+          grep -q 'S.physicsAccumulator' src/main.js
           node --test tests/rules.test.mjs
           node --test tests/ai-strategy.test.mjs
           node --test tests/motion-profile.test.mjs
           node --test tests/room-state.test.mjs
           node --test tests/stats.test.mjs
           node --test tests/performance-budget.test.mjs
+          node --test tests/simulation-clock.test.mjs
