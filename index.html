@@ -86,7 +86,7 @@
           <div class="game-stage-wrap">
             <div class="score-hud">
               <div class="score-team active-team"><small>TEAM YOLO</small><b id="scoreHome">00</b></div>
-              <div class="score-center"><span>RALLY</span><b id="rallyLabel">READY</b></div>
+              <div class="score-center"><span id="scoreCallLabel">OFFICIAL SCORE CALL</span><b id="rallyLabel">0 – 0 – 2</b><small id="serverNameLabel">SERVER 2</small></div>
               <div class="score-team"><small>OPPONENT</small><b id="scoreAway">00</b></div>
             </div>
             <div class="game-stage" id="gameStage">
@@ -168,13 +168,15 @@
       <button class="modal-close" id="closeRulesModal" type="button" aria-label="Đóng">×</button>
       <span class="eyebrow">QUICK RULES</span><h2>LUẬT PICKLEBALL.</h2>
       <ul>
-        <li><b>Serve:</b> Giao bóng chéo sân, bóng phải qua kitchen line và vào ô giao bóng đối diện.</li>
-        <li><b>Two-bounce rule:</b> Sau giao bóng, mỗi bên phải để bóng nảy một lần trước khi volley.</li>
-        <li><b>Kitchen:</b> Không volley khi đang đứng trong vùng non-volley zone.</li>
-        <li><b>Rally:</b> Bóng ra ngoài, chạm lưới không qua sân hoặc nảy hai lần sẽ kết thúc pha bóng.</li>
-        <li><b>Điểm:</b> Trận tiêu chuẩn thường đánh đến 11 điểm và phải hơn đối thủ ít nhất 2 điểm.</li>
+        <li><b>Serve:</b> Giao dưới tay từ phía sau baseline, theo đường chéo vào ô giao bóng đối diện; bóng phải rơi ngoài Kitchen và không chạm vạch Kitchen.</li>
+        <li><b>No-let serve:</b> Giao bóng chạm lưới nhưng vẫn rơi đúng ô giao bóng hợp lệ thì tiếp tục chơi; rơi sai ô, vào Kitchen hoặc ra ngoài là lỗi.</li>
+        <li><b>Two-bounce rule:</b> Bên nhận phải để bóng giao nảy một lần; bên giao phải để cú trả giao nảy thêm một lần. Sau hai lần nảy, hai bên mới được volley.</li>
+        <li><b>Kitchen:</b> Không được volley khi chân hoặc cơ thể chạm vùng Non-Volley Zone hay vạch Kitchen. Đà sau cú volley đưa người chơi vào Kitchen cũng là lỗi. Được đứng trong Kitchen để đánh bóng sau khi bóng đã nảy.</li>
+        <li><b>Điểm đôi:</b> Chỉ đội đang giao bóng mới ghi điểm. Điểm gọi theo thứ tự: điểm đội giao – điểm đội nhận – số người giao (1 hoặc 2). Server 1 thua pha bóng thì chuyển cho Server 2; Server 2 thua thì side-out.</li>
+        <li><b>Đổi vị trí:</b> Đội giao ghi điểm thì người giao và đồng đội đổi bên; khi side-out, người đứng ở ô bên phải của đội mới sẽ giao đầu tiên.</li>
+        <li><b>Kết thúc:</b> Bản YOLO hiện đặt mục tiêu 11 điểm, phải dẫn ít nhất 2 điểm.</li>
       </ul>
-      <p class="rules-note">Bản thử nghiệm hiện ưu tiên trải nghiệm điều khiển và mô phỏng pha bóng; luật thi đấu đầy đủ sẽ tiếp tục được hoàn thiện.</p>
+      <p class="rules-note">Đây là bộ luật đôi cốt lõi cho chế độ thử nghiệm. Các tình huống chuyên sâu như foot fault, hinder, line-call tranh chấp và luật giải đấu cần được hoàn thiện thêm trước khi dùng cho thi đấu chính thức.</p>
     </div>
   </div>
 
